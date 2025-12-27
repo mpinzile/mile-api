@@ -1,4 +1,4 @@
-# backend/utils/helpers.py
+# app/utils/helpers.py
 from datetime import datetime, timedelta
 import hashlib
 import random
@@ -8,8 +8,12 @@ from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from sqlalchemy.orm import Session
 
-def success_response(data=None, message="Operation successful"):
-    return {"success": True, "data": data, "message": message}
+def success_response(data=None, message="Operation successful", pagination=None):
+    response = {"success": True, "data": data, "message": message}
+    if pagination is not None:
+        response["pagination"] = pagination
+    return response
+
 
 def error_response(code, message, details=None):
     return {"success": False, "error": {"code": code, "message": message, "details": details}}
