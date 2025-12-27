@@ -21,6 +21,7 @@ from app.models.super_agent import SuperAgent
 
 router = APIRouter()
 
+# List all shops managed by current user
 @router.get("/")
 def list_shops(
     request: Request,
@@ -32,7 +33,16 @@ def list_shops(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = db.query(Shop).filter(Shop.owner_id == current_user.id)
+    # Get shop IDs where user is a cashier
+    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+
+    # Query shops: either owned or where user is cashier
+    query = db.query(Shop).filter(
+        or_(
+            Shop.owner_id == current_user.id,
+            Shop.id.in_(cashier_shop_ids)
+        )
+    )
 
     if search:
         search_pattern = f"%{search}%"
