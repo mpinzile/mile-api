@@ -17,6 +17,7 @@ from app.utils.validation_functions import (
 )
 from app.utils.auth import create_access_token, get_current_user
 from app.utils.error_codes import ERROR_CODES
+from app.models.cashier import Cashier
 
 router = APIRouter()
 
@@ -130,12 +131,13 @@ async def login(request: Request, response: Response, db: Session = Depends(get_
             content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Missing login credentials")
         )
 
-    # Try to normalize phone if identifier looks like a phone
+    # Normalize phone if identifier looks like a Tanzanian phone number
     try:
         normalized_phone = validate_tanzanian_phone(identifier)
     except ValueError:
         normalized_phone = None  # Not a valid phone
 
+    # Find user by email, username, or phone
     user = db.query(User).filter(
         or_(
             User.email == identifier,
@@ -152,12 +154,22 @@ async def login(request: Request, response: Response, db: Session = Depends(get_
             content=error_response(ERROR_CODES["FORBIDDEN"], "Invalid credentials")
         )
 
+    # Determine shop_id if user is a cashier
+    shop_id = None
+    if user.role == AppRole.cashier:
+        cashier = db.query(Cashier).filter(Cashier.user_id == user.id).first()
+        if cashier:
+            shop_id = str(cashier.shop_id)
+
+    # Create tokens
     access_token = create_access_token({
         "user_id": str(user.id),
-        "role": user.role.value
+        "role": user.role.value,
+        "shop_id": shop_id  # optional, include in JWT
     })
     refresh_token = create_refresh_token_entry(user, db)
 
+    # Set session cookie
     response.set_cookie(
         key="session_id",
         value=str(user.id),
@@ -173,12 +185,13 @@ async def login(request: Request, response: Response, db: Session = Depends(get_
                 "email": user.email,
                 "full_name": user.full_name,
                 "role": user.role.value,
-                "shop_id": None
+                "shop_id": shop_id
             },
             "access_token": access_token,
             "refresh_token": refresh_token,
             "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        }
+        },
+        message="Login successful"
     )
 
 
