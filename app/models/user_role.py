@@ -4,8 +4,8 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, UniqueConstraint, Enum, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from db.base import Base
-from models.enums import AppRole
+from app.db.base import Base
+from app.models.enums import AppRole
 
 
 class UserRole(Base):

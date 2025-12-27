@@ -1,6 +1,6 @@
 # app/utils/validation_functions.py
 import re
-from models.enums import AppRole
+from app.models.enums import AppRole
 
 def validate_email(email: str) -> bool:
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'

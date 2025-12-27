@@ -4,8 +4,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import routers
-from api.routes import auth, cashiers, shops
-from utils.error_codes import HTTP_STATUS_TO_ERROR_CODE
+from app.api.routes import auth, cashiers, shops
+from app.utils.error_codes import HTTP_STATUS_TO_ERROR_CODE
 
 app = FastAPI(
     title="Backend API",

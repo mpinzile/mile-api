@@ -4,9 +4,9 @@ from datetime import datetime
 from sqlalchemy import Column, Text, DateTime, Enum, JSON, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, INET
 from sqlalchemy.orm import relationship
-from db.base import Base
-from models.enums import AuditAction
-from models.user import User
+from app.db.base import Base
+from app.models.enums import AuditAction
+from app.models.user import User
 
 
 class AuditLog(Base):

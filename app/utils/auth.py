@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException, Request, Cookie
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from db.get_db import get_db
-from models.user import User
-from core.config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
+from app.db.get_db import get_db
+from app.models.user import User
+from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
 
 security = HTTPBearer()
 

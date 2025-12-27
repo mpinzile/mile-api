@@ -3,8 +3,8 @@ import uuid
 from datetime import datetime
 from sqlalchemy import Column, Text, DateTime, Boolean, Enum
 from sqlalchemy.dialects.postgresql import UUID
-from db.base import Base
-from models.enums import AppRole
+from app.db.base import Base
+from app.models.enums import AppRole
 
 
 class User(Base):

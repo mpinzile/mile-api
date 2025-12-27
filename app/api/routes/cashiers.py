@@ -3,16 +3,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from datetime import datetime
-import uuid
-
-from db.get_db import get_db
-from models.cashier import Cashier
-from models.user import User
-from models.shop import Shop
-from utils.helpers import hash_password, success_response, error_response
-from utils.validation_functions import validate_email, validate_tanzanian_phone
-from utils.auth import get_current_user
-from utils.error_codes import ERROR_CODES
+from app.db.get_db import get_db
+from app.models.cashier import Cashier
+from app.models.user import User
+from app.models.shop import Shop
+from app.utils.helpers import hash_password, success_response, error_response
+from app.utils.validation_functions import validate_email, validate_tanzanian_phone
+from app.utils.auth import get_current_user
+from app.utils.error_codes import ERROR_CODES
 
 router = APIRouter()
 

@@ -4,8 +4,8 @@ from datetime import datetime
 from sqlalchemy import Column, Text, DateTime, Numeric, Enum, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from db.base import Base
-from models.enums import Category, TransactionType
+from app.db.base import Base
+from app.models.enums import Category, TransactionType
 
 
 class Transaction(Base):

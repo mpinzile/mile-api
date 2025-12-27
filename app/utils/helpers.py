@@ -4,9 +4,9 @@ import datetime
 import hashlib
 import random
 import uuid
-from core.config import REFRESH_TOKEN_EXPIRE_DAYS
-from models.refresh_token import RefreshToken
-from models.user import User
+from app.core.config import REFRESH_TOKEN_EXPIRE_DAYS
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
 from sqlalchemy.orm import Session
 
 def success_response(data=None, message="Operation successful"):

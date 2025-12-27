@@ -2,19 +2,19 @@ from fastapi import APIRouter, Request, Depends, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
-from db.get_db import get_db
-from models.user import User
-from models.refresh_token import RefreshToken
-from models.enums import AppRole
-from core.config import ACCESS_TOKEN_EXPIRE_MINUTES, MAX_COOKIE_AGE, REFRESH_TOKEN_EXPIRE_DAYS
-from utils.helpers import create_refresh_token_entry, hash_password, success_response, error_response
-from utils.validation_functions import (
+from app.db.get_db import get_db
+from app.models.user import User
+from app.models.refresh_token import RefreshToken
+from app.models.enums import AppRole
+from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, MAX_COOKIE_AGE, REFRESH_TOKEN_EXPIRE_DAYS
+from app.utils.helpers import create_refresh_token_entry, hash_password, success_response, error_response
+from app.utils.validation_functions import (
     validate_email,
     validate_password_strength,
     validate_tanzanian_phone
 )
-from utils.auth import create_access_token, get_current_user
-from utils.error_codes import ERROR_CODES
+from app.utils.auth import create_access_token, get_current_user
+from app.utils.error_codes import ERROR_CODES
 
 router = APIRouter()
 

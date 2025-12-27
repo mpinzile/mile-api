@@ -10,6 +10,7 @@ greenlet==3.3.0
 h11==0.16.0
 idna==3.11
 jwt==1.4.0
+psycopg2-binary==2.9.11
 pycparser==2.23
 pydantic==2.12.5
 pydantic_core==2.41.5

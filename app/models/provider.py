@@ -3,8 +3,8 @@ import uuid
 from datetime import datetime
 from sqlalchemy import Column, Text, DateTime, Numeric, Enum
 from sqlalchemy.dialects.postgresql import UUID
-from db.base import Base
-from models.enums import Category
+from app.db.base import Base
+from app.models.enums import Category
 
 
 class Provider(Base):

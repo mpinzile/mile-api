@@ -3,8 +3,8 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from db.base import Base
-from models.user import User
+from app.db.base import Base
+from app.models.user import User
 
 
 class Cashier(Base):
