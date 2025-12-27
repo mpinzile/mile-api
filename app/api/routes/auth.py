@@ -262,20 +262,60 @@ async def update_profile(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if user.role.value == "cashier":
+        return JSONResponse(
+            status_code=403,
+            content=error_response(
+                ERROR_CODES["FORBIDDEN"],
+                "Cashiers are not allowed to update their profile"
+            )
+        )
+
     body = await request.json()
 
     if "full_name" in body:
         user.full_name = body["full_name"]
 
     if "phone" in body:
-        try:
-            from utils.validation_functions import validate_tanzanian_phone
-            user.phone = validate_tanzanian_phone(body["phone"])
-        except ValueError as e:
+        from utils.validation_functions import validate_tanzanian_phone
+        new_phone = validate_tanzanian_phone(body["phone"])
+
+        existing_user = db.query(User).filter(
+            User.phone == new_phone,
+            User.id != user.id
+        ).first()
+        if existing_user:
             return JSONResponse(
                 status_code=400,
-                content=error_response(ERROR_CODES["VALIDATION_ERROR"], str(e))
+                content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Phone number already in use")
             )
+        user.phone = new_phone
+
+    if "email" in body:
+        new_email = body["email"].strip().lower()
+        existing_user = db.query(User).filter(
+            User.email == new_email,
+            User.id != user.id
+        ).first()
+        if existing_user:
+            return JSONResponse(
+                status_code=400,
+                content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Email already in use")
+            )
+        user.email = new_email
+
+    if "username" in body:
+        new_username = body["username"].strip()
+        existing_user = db.query(User).filter(
+            User.username == new_username,
+            User.id != user.id
+        ).first()
+        if existing_user:
+            return JSONResponse(
+                status_code=400,
+                content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Username already in use")
+            )
+        user.username = new_username
 
     user.updated_at = datetime.utcnow()
     db.commit()
