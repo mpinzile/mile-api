@@ -151,7 +151,7 @@ def list_cashiers(
         message="Cashiers retrieved successfully"
     )
 
-@router.post("/shops/{shop_id}/cashiers")
+@router.post("/{shop_id}/cashiers")
 async def create_cashier(shop_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     body = await request.json()
     name = body.get("name")
