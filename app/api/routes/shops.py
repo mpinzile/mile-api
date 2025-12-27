@@ -180,12 +180,27 @@ async def create_cashier(shop_id: str, request: Request, db: Session = Depends(g
             content=error_response(ERROR_CODES["VALIDATION_ERROR"], str(e))
         )
 
-    if db.query(User).filter(or_(User.email == email, User.username == username, User.phone == phone)).first():
+    # Check for duplicate email
+    if db.query(User).filter(User.email == email).first():
         return JSONResponse(
             status_code=400,
-            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Email, username, or phone already exists")
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Email already registered")
         )
 
+    # Check for duplicate username
+    if db.query(User).filter(User.username == username).first():
+        return JSONResponse(
+            status_code=400,
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Username already exists")
+        )
+
+    # Check for duplicate phone
+    if db.query(User).filter(User.phone == phone).first():
+        return JSONResponse(
+            status_code=400,
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Phone number already registered")
+        )
+    
     user = User(
         username=username,
         full_name=name,
