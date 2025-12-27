@@ -14,6 +14,7 @@ from app.utils.error_codes import ERROR_CODES
 from app.utils.validation_functions import validate_email, validate_tanzanian_phone
 from app.models.enums import Category
 from app.models.provider import Provider
+from models.super_agent import SuperAgent
 
 router = APIRouter()
 
@@ -305,3 +306,52 @@ async def create_provider(
         message="Provider created successfully"
     )
 
+
+@router.get("/{shop_id}/super-agents")
+def list_super_agents(shop_id: str, db: Session = Depends(get_db)):
+    agents = db.query(SuperAgent).filter(SuperAgent.shop_id == shop_id).all()
+    data = [
+        {
+            "id": str(agent.id),
+            "name": agent.name,
+            "reference": agent.reference,
+            "shop_id": str(agent.shop_id),
+            "created_at": agent.created_at.isoformat(),
+            "updated_at": agent.updated_at.isoformat()
+        }
+        for agent in agents
+    ]
+    return success_response(data=data)
+
+@router.post("/{shop_id}/super-agents")
+async def create_super_agent(shop_id: str, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    name = body.get("name")
+    reference = body.get("reference")
+
+    if not all([name, reference]):
+        return JSONResponse(
+            status_code=400,
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Missing required fields: name, reference")
+        )
+
+    agent = SuperAgent(
+        shop_id=shop_id,
+        name=name,
+        reference=reference,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    db.add(agent)
+    db.commit()
+    db.refresh(agent)
+
+    data = {
+        "id": str(agent.id),
+        "name": agent.name,
+        "reference": agent.reference,
+        "shop_id": str(agent.shop_id),
+        "created_at": agent.created_at.isoformat(),
+        "updated_at": agent.updated_at.isoformat()
+    }
+    return success_response(data=data, message="Super agent created successfully")

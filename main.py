@@ -4,7 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import routers
-from app.api.routes import auth, cashiers, shops
+from app.api.routes import auth, cashiers, shops, providers, super_agents
 from app.utils.error_codes import HTTP_STATUS_TO_ERROR_CODE
 
 app = FastAPI(
@@ -37,6 +37,8 @@ def root():
 app.include_router(auth.router, prefix=f"{API_PREFIX}/auth", tags=["Auth"])
 app.include_router(cashiers.router, prefix=f"{API_PREFIX}/cashiers", tags=["Cashiers"])
 app.include_router(shops.router, prefix=f"{API_PREFIX}/shops", tags=["Shops"])
+app.include_router(providers.router, prefix=f"{API_PREFIX}/providers", tags=["Providers"])
+app.include_router(super_agents.router, prefix=f"{API_PREFIX}/super-agents", tags=["Super Agents"])
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
