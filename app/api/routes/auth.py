@@ -60,6 +60,12 @@ async def register(request: Request, response: Response, db: Session = Depends(g
             content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Email already registered")
         )
     
+    if db.query(User).filter(User.phone == phone).first():
+        return JSONResponse(
+            status_code=400,
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Phone number already registered")
+        )
+    
     base_username = email.split("@")[0]
     username = base_username
     while db.query(User).filter(User.username == username).first():
