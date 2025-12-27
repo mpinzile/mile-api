@@ -1,7 +1,9 @@
+# app/api/routes/shops.py
+
 from decimal import Decimal
-from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi import APIRouter, Query, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import or_
+from sqlalchemy import asc, desc, or_
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.db.get_db import get_db
@@ -14,10 +16,77 @@ from app.utils.error_codes import ERROR_CODES
 from app.utils.validation_functions import validate_email, validate_tanzanian_phone
 from app.models.enums import Category
 from app.models.provider import Provider
-from models.super_agent import SuperAgent
+from app.models.cash_balance import CashBalance
+from app.models.super_agent import SuperAgent
 
 router = APIRouter()
 
+@router.get("/")
+def list_shops(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    search: str = Query(None),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    query = db.query(Shop).filter(Shop.owner_id == current_user.id)
+
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(or_(
+            Shop.name.ilike(search_pattern),
+            Shop.location.ilike(search_pattern)
+        ))
+
+    if sort_by not in ["name", "location", "created_at"]:
+        sort_by = "created_at"
+
+    sort_column = getattr(Shop, sort_by)
+    if sort_order.lower() == "asc":
+        query = query.order_by(asc(sort_column))
+    else:
+        query = query.order_by(desc(sort_column))
+
+    total_items = query.count()
+    total_pages = (total_items + limit - 1) // limit
+
+    shops = query.offset((page - 1) * limit).limit(limit).all()
+    data = []
+
+    for shop in shops:
+        total_cashiers = db.query(Cashier).filter(Cashier.shop_id == shop.id).count()
+        total_providers = db.query(Provider).filter(Provider.shop_id == shop.id).count()
+        cash_balance_obj = db.query(CashBalance).filter(CashBalance.shop_id == shop.id).first()
+        cash_balance = float(cash_balance_obj.balance) if cash_balance_obj else 0.0
+
+        data.append({
+            "id": str(shop.id),
+            "name": shop.name,
+            "location": shop.location,
+            "owner_id": str(shop.owner_id) if shop.owner_id else None,
+            "is_active": getattr(shop, "is_active", True),
+            "created_at": shop.created_at.isoformat(),
+            "updated_at": shop.updated_at.isoformat(),
+            "stats": {
+                "total_cashiers": total_cashiers,
+                "total_providers": total_providers,
+                "cash_balance": cash_balance
+            }
+        })
+
+    return success_response(
+        data=data,
+        message="Shops retrieved successfully",
+        pagination={
+            "page": page,
+            "limit": limit,
+            "total_items": total_items,
+            "total_pages": total_pages
+        }
+    )
 
 @router.post("/")
 async def create_shop(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
