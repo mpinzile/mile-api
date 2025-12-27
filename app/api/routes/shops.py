@@ -1,3 +1,4 @@
+from decimal import Decimal
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import or_
@@ -11,6 +12,8 @@ from app.utils.helpers import hash_password, success_response, error_response
 from app.utils.auth import get_current_user
 from app.utils.error_codes import ERROR_CODES
 from app.utils.validation_functions import validate_email, validate_tanzanian_phone
+from app.models.enums import Category
+from app.models.provider import Provider
 
 router = APIRouter()
 
@@ -239,3 +242,66 @@ async def create_cashier(shop_id: str, request: Request, db: Session = Depends(g
         },
         message="Cashier created successfully"
     )
+
+@router.post("/{shop_id}/providers")
+async def create_provider(
+    shop_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    body = await request.json()
+    name = body.get("name")
+    category = body.get("category")
+    agent_code = body.get("agent_code")
+    opening_balance = body.get("opening_balance", 0)
+
+    if not all([name, category]):
+        return JSONResponse(
+            status_code=400,
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Name and category are required")
+        )
+
+    if category not in Category.__members__:
+        return JSONResponse(
+            status_code=400,
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], f"Invalid category. Allowed: {list(Category.__members__.keys())}")
+        )
+
+    try:
+        opening_balance = Decimal(opening_balance)
+        if opening_balance < 0:
+            raise ValueError
+    except:
+        return JSONResponse(
+            status_code=400,
+            content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Invalid opening_balance")
+        )
+
+    provider = Provider(
+        shop_id=shop_id,
+        name=name,
+        category=Category[category],
+        agent_code=agent_code,
+        opening_balance=opening_balance,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+
+    return success_response(
+        data={
+            "id": str(provider.id),
+            "shop_id": provider.shop_id,
+            "name": provider.name,
+            "category": provider.category.value,
+            "agent_code": provider.agent_code,
+            "opening_balance": float(provider.opening_balance),
+            "created_at": provider.created_at.isoformat(),
+            "updated_at": provider.updated_at.isoformat()
+        },
+        message="Provider created successfully"
+    )
+
