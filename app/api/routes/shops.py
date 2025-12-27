@@ -387,7 +387,24 @@ async def create_provider(
 
 
 @router.get("/{shop_id}/super-agents")
-def list_super_agents(shop_id: str, db: Session = Depends(get_db)):
+def list_super_agents(
+    shop_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Check if user owns the shop or is a cashier
+    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+    shop = db.query(Shop).filter(
+        Shop.id == shop_id,
+        or_(
+            Shop.owner_id == current_user.id,
+            Shop.id.in_(cashier_shop_ids)
+        )
+    ).first()
+
+    if not shop:
+        raise HTTPException(status_code=403, detail="You do not have access to this shop")
+
     agents = db.query(SuperAgent).filter(SuperAgent.shop_id == shop_id).all()
     data = [
         {
@@ -400,7 +417,7 @@ def list_super_agents(shop_id: str, db: Session = Depends(get_db)):
         }
         for agent in agents
     ]
-    return success_response(data=data)
+    return success_response(data=data, message="Super agents retrieved successfully")
 
 @router.post("/{shop_id}/super-agents")
 async def create_super_agent(shop_id: str, request: Request, db: Session = Depends(get_db)):
