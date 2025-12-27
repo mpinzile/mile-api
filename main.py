@@ -31,7 +31,7 @@ API_PREFIX = "/api/v1"
 # Root route
 @app.get("/")
 def root():
-    return {"success": True, "message": "Welcome to the Index backend API!", "data": None}
+    return {"success": True, "message": "Welcome to the Mile backend API!", "data": None}
 
 # Include routers
 app.include_router(auth.router, prefix=f"{API_PREFIX}/auth", tags=["Auth"])
