@@ -1,6 +1,7 @@
 import uuid
 from fastapi import APIRouter, Request, Depends, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.db.get_db import get_db
@@ -120,17 +121,27 @@ async def register(request: Request, response: Response, db: Session = Depends(g
 @router.post("/login")
 async def login(request: Request, response: Response, db: Session = Depends(get_db)):
     body = await request.json()
-    email = body.get("email")
+    identifier = body.get("identifier")
     password = body.get("password")
 
-    if not email or not password:
+    if not identifier or not password:
         return JSONResponse(
             status_code=400,
             content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Missing login credentials")
         )
 
+    # Try to normalize phone if identifier looks like a phone
+    try:
+        normalized_phone = validate_tanzanian_phone(identifier)
+    except ValueError:
+        normalized_phone = None  # Not a valid phone
+
     user = db.query(User).filter(
-        User.email == email,
+        or_(
+            User.email == identifier,
+            User.username == identifier,
+            User.phone == normalized_phone
+        ),
         User.deleted_at.is_(None),
         User.is_active.is_(True)
     ).first()
@@ -146,7 +157,6 @@ async def login(request: Request, response: Response, db: Session = Depends(get_
         "role": user.role.value
     })
     refresh_token = create_refresh_token_entry(user, db)
-
 
     response.set_cookie(
         key="session_id",
