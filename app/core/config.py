@@ -2,6 +2,7 @@
 
 import os
 from dotenv import load_dotenv
+from app.models.enums import TransactionType
 
 load_dotenv()
 
@@ -24,3 +25,4 @@ if APP_ENV == "production":
     COOKIE_DOMAIN = "mile.sewmrtechnologies.com"
 else:
     COOKIE_DOMAIN = None 
+WITHDRAWAL_TYPES = [TransactionType.withdrawal.value, TransactionType.bank_withdrawal.value]

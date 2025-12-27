@@ -20,6 +20,7 @@ from app.models.cash_balance import CashBalance
 from app.models.super_agent import SuperAgent
 from app.models.transaction import Transaction
 from app.models.float import FloatBalance, FloatMovement
+from app.core.config import WITHDRAWAL_TYPES
 
 router = APIRouter()
 
@@ -688,3 +689,130 @@ async def create_super_agent(shop_id: str, request: Request, db: Session = Depen
         "updated_at": agent.updated_at.isoformat()
     }
     return success_response(data=data, message="Super agent created successfully")
+
+
+@router.post("/{shop_id}/transactions")
+async def create_transaction(
+    shop_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    body = await request.json()
+    required_fields = ["category", "type", "provider_id", "amount", "reference", "customer_identifier", "transaction_date"]
+    if not all(f in body for f in required_fields):
+        return error_response(ERROR_CODES["VALIDATION_ERROR"], "Missing required fields")
+
+    # Validate shop access (owner or cashier)
+    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+    shop = db.query(Shop).filter(
+        Shop.id == shop_id,
+        Shop.id.in_(cashier_shop_ids) | (Shop.owner_id == current_user.id)
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=403, detail="You do not have access to this shop")
+
+    # Fetch provider
+    provider = db.query(Provider).filter(Provider.id == body["provider_id"], Provider.shop_id == shop_id).first()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found in this shop")
+
+    # Convert amount and commission
+    amount = Decimal(body["amount"])
+    commission = Decimal(body.get("commission", 0))
+
+    # Fetch or create FloatBalance for this provider and category
+    float_balance_obj = db.query(FloatBalance).filter(
+        FloatBalance.shop_id == shop_id,
+        FloatBalance.provider_id == provider.id,
+        FloatBalance.category == body["category"]
+    ).first()
+
+    if not float_balance_obj:
+        float_balance_obj = FloatBalance(
+            shop_id=shop_id,
+            provider_id=provider.id,
+            category=body["category"],
+            balance=0,
+            last_updated=datetime.utcnow()
+        )
+        db.add(float_balance_obj)
+        db.commit()
+        db.refresh(float_balance_obj)
+
+    prev_float = float(float_balance_obj.balance)
+
+    # Fetch or create CashBalance for the shop
+    cash_balance_obj = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
+    if not cash_balance_obj:
+        cash_balance_obj = CashBalance(shop_id=shop_id, balance=0)
+        db.add(cash_balance_obj)
+        db.commit()
+        db.refresh(cash_balance_obj)
+
+    prev_cash = float(cash_balance_obj.balance)
+
+    txn_type = body["type"]
+
+    # Logic: withdrawal -> add to provider, deduct from cash; else deduct provider, add cash
+    if txn_type in WITHDRAWAL_TYPES:
+        float_balance_obj.balance += amount
+        cash_balance_obj.balance -= amount
+    else:
+        float_balance_obj.balance -= amount
+        cash_balance_obj.balance += amount
+
+    float_balance_obj.last_updated = datetime.utcnow()
+    cash_balance_obj.updated_at = datetime.utcnow()
+
+    # Record transaction
+    transaction = Transaction(
+        shop_id=shop_id,
+        provider_id=provider.id,
+        recorded_by=current_user.id,
+        category=body["category"],
+        type=txn_type,
+        amount=amount,
+        commission=commission,
+        reference=body["reference"],
+        customer_identifier=body["customer_identifier"],
+        receipt_image_url=body.get("receipt_image"),
+        notes=body.get("notes"),
+        transaction_date=datetime.fromisoformat(body["transaction_date"])
+    )
+
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
+    db.refresh(float_balance_obj)
+    db.refresh(cash_balance_obj)
+
+    return success_response(
+        data={
+            "id": str(transaction.id),
+            "category": transaction.category,
+            "type": transaction.type,
+            "amount": float(transaction.amount),
+            "commission": float(transaction.commission),
+            "reference": transaction.reference,
+            "customer_identifier": transaction.customer_identifier,
+            "shop_id": shop_id,
+            "provider_id": provider.id,
+            "recorded_by": current_user.id,
+            "transaction_date": transaction.transaction_date.isoformat(),
+            "created_at": transaction.created_at.isoformat(),
+            "balance_updates": {
+                "float_balance": {
+                    "previous": prev_float,
+                    "current": float(float_balance_obj.balance),
+                    "change": float(float_balance_obj.balance - prev_float)
+                },
+                "cash_balance": {
+                    "previous": prev_cash,
+                    "current": float(cash_balance_obj.balance),
+                    "change": float(cash_balance_obj.balance - prev_cash)
+                }
+            }
+        },
+        message="Transaction recorded successfully"
+    )
