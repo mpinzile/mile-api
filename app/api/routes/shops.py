@@ -816,3 +816,118 @@ async def create_transaction(
         },
         message="Transaction recorded successfully"
     )
+
+@router.get("/{shop_id}/transactions")
+def list_transactions(
+    shop_id: str,
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    category: str = Query(None),
+    type: str = Query(None),
+    provider_id: str = Query(None),
+    recorded_by: str = Query(None),
+    start_date: str = Query(None),
+    end_date: str = Query(None),
+    min_amount: float = Query(None),
+    max_amount: float = Query(None),
+    search: str = Query(None),
+    sort_by: str = Query("transaction_date"),
+    sort_order: str = Query("desc"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Check user access: owner or cashier
+    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+    shop = db.query(Shop).filter(
+        Shop.id == shop_id,
+        or_(Shop.owner_id == current_user.id, Shop.id.in_(cashier_shop_ids))
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=403, detail="You do not have access to this shop")
+
+    query = db.query(Transaction).filter(Transaction.shop_id == shop_id)
+
+    if category:
+        query = query.filter(Transaction.category == category)
+    if type:
+        query = query.filter(Transaction.type == type)
+    if provider_id:
+        query = query.filter(Transaction.provider_id == provider_id)
+    if recorded_by:
+        query = query.filter(Transaction.recorded_by == recorded_by)
+    if start_date:
+        query = query.filter(Transaction.transaction_date >= datetime.fromisoformat(start_date))
+    if end_date:
+        query = query.filter(Transaction.transaction_date <= datetime.fromisoformat(end_date))
+    if min_amount:
+        query = query.filter(Transaction.amount >= Decimal(min_amount))
+    if max_amount:
+        query = query.filter(Transaction.amount <= Decimal(max_amount))
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            Transaction.reference.ilike(pattern),
+            Transaction.customer_identifier.ilike(pattern)
+        ))
+
+    if sort_by not in ["transaction_date", "amount", "created_at"]:
+        sort_by = "transaction_date"
+    sort_column = getattr(Transaction, sort_by)
+    query = query.order_by(asc(sort_column) if sort_order.lower() == "asc" else desc(sort_column))
+
+    total_items = query.count()
+    total_pages = (total_items + limit - 1) // limit
+    transactions = query.offset((page - 1) * limit).limit(limit).all()
+
+    data = []
+    total_amount = Decimal(0)
+    total_commission = Decimal(0)
+
+    for txn in transactions:
+        provider = db.query(Provider).filter(Provider.id == txn.provider_id).first()
+        user = db.query(User).filter(User.id == txn.recorded_by).first()
+        total_amount += txn.amount
+        total_commission += txn.commission
+
+        data.append({
+            "id": str(txn.id),
+            "category": txn.category,
+            "type": txn.type,
+            "amount": float(txn.amount),
+            "commission": float(txn.commission),
+            "reference": txn.reference,
+            "customer_identifier": txn.customer_identifier,
+            "receipt_image": getattr(txn, "receipt_image_url", None),
+            "notes": txn.notes,
+            "shop_id": str(txn.shop_id),
+            "provider_id": str(txn.provider_id),
+            "recorded_by": str(txn.recorded_by) if txn.recorded_by else None,
+            "transaction_date": txn.transaction_date.isoformat(),
+            "created_at": txn.created_at.isoformat(),
+            "updated_at": txn.updated_at.isoformat(),
+            "provider": {
+                "id": str(provider.id),
+                "name": provider.name,
+                "category": provider.category.value
+            } if provider else None,
+            "recorded_by_user": {
+                "id": str(user.id),
+                "full_name": user.full_name
+            } if user else None
+        })
+
+    return success_response(
+        data=data,
+        pagination={
+            "page": page,
+            "limit": limit,
+            "total_items": total_items,
+            "total_pages": total_pages
+        },
+        summary={
+            "total_amount": float(total_amount),
+            "total_commission": float(total_commission),
+            "transaction_count": total_items
+        }
+    )

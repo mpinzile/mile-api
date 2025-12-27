@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import asc, desc, func, or_
 from datetime import datetime
 from decimal import Decimal
 from app.db.get_db import get_db
@@ -174,3 +174,55 @@ def get_transaction_types():
         ]
     }
     return success_response(data=types)
+
+
+@router.get("/{transaction_id}")
+def get_transaction(
+    transaction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    txn = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Verify access: owner or cashier of the shop
+    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+    shop = db.query(Shop).filter(
+        Shop.id == txn.shop_id,
+        or_(Shop.owner_id == current_user.id, Shop.id.in_(cashier_shop_ids))
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=403, detail="You do not have access to this transaction")
+
+    provider = db.query(Provider).filter(Provider.id == txn.provider_id).first()
+    user = db.query(User).filter(User.id == txn.recorded_by).first()
+
+    data = {
+        "id": str(txn.id),
+        "category": txn.category,
+        "type": txn.type,
+        "amount": float(txn.amount),
+        "commission": float(txn.commission),
+        "reference": txn.reference,
+        "customer_identifier": txn.customer_identifier,
+        "receipt_image": getattr(txn, "receipt_image_url", None),
+        "notes": txn.notes,
+        "shop_id": str(txn.shop_id),
+        "provider_id": str(txn.provider_id),
+        "recorded_by": str(txn.recorded_by) if txn.recorded_by else None,
+        "transaction_date": txn.transaction_date.isoformat(),
+        "created_at": txn.created_at.isoformat(),
+        "updated_at": txn.updated_at.isoformat(),
+        "provider": {
+            "id": str(provider.id),
+            "name": provider.name,
+            "category": provider.category.value
+        } if provider else None,
+        "recorded_by_user": {
+            "id": str(user.id),
+            "full_name": user.full_name
+        } if user else None
+    }
+
+    return success_response(data=data)
