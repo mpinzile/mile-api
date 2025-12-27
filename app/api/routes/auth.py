@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, Request, Depends, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -58,9 +59,15 @@ async def register(request: Request, response: Response, db: Session = Depends(g
             status_code=400,
             content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Email already registered")
         )
+    
+    base_username = email.split("@")[0]
+    username = base_username
+    while db.query(User).filter(User.username == username).first():
+        unique_suffix = str(uuid.uuid4())[:8]
+        username = f"{base_username}_{unique_suffix}"
 
     user = User(
-        username=email.split("@")[0],
+        username=username,
         email=email,
         full_name=full_name,
         phone=phone,
@@ -88,6 +95,7 @@ async def register(request: Request, response: Response, db: Session = Depends(g
         data={
             "user": {
                 "id": str(user.id),
+                "username": user.username,
                 "email": user.email,
                 "full_name": user.full_name,
                 "phone": user.phone,
