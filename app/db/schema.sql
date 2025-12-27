@@ -45,7 +45,7 @@ CREATE TABLE public.users (
   full_name text NOT NULL,
   hashed_password text NOT NULL,
   is_active boolean DEFAULT true NOT NULL,
-  role app_role NOT NULL DEFAULT 'admin',
+  role app_role NOT NULL DEFAULT 'superadmin',
   created_at timestamptz DEFAULT now() NOT NULL,
   updated_at timestamptz DEFAULT now() NOT NULL,
   deleted_at timestamptz
