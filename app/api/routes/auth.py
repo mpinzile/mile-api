@@ -80,7 +80,10 @@ async def register(request: Request, response: Response, db: Session = Depends(g
     db.commit()
     db.refresh(user)
 
-    access_token = create_access_token(user)
+    access_token = create_access_token({
+        "user_id": str(user.id),
+        "role": user.role.value
+    })
     refresh_token = create_refresh_token_entry(user, db)
 
     response.set_cookie(
@@ -132,7 +135,10 @@ async def login(request: Request, response: Response, db: Session = Depends(get_
             content=error_response(ERROR_CODES["FORBIDDEN"], "Invalid credentials")
         )
 
-    access_token = create_access_token(user)
+    access_token = create_access_token({
+        "user_id": str(user.id),
+        "role": user.role.value
+    })
     refresh_token = create_refresh_token_entry(user, db)
 
 
@@ -184,7 +190,10 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         )
 
     user = db.query(User).filter(User.id == refresh.user_id).first()
-    access_token = create_access_token(user)
+    access_token = create_access_token({
+        "user_id": str(user.id),
+        "role": user.role.value
+    })
     return success_response(
         data={
             "access_token": access_token,
