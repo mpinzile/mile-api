@@ -19,6 +19,7 @@ from app.models.provider import Provider
 from app.models.cash_balance import CashBalance
 from app.models.super_agent import SuperAgent
 from app.models.transaction import Transaction
+from app.models.float import FloatBalance, FloatMovement
 
 router = APIRouter()
 
@@ -105,7 +106,7 @@ def get_single_shop(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 🔐 Permission check: owner OR cashier
+    # Permission check: owner OR cashier
     cashier_shop_ids = (
         db.query(Cashier.shop_id)
         .filter(Cashier.user_id == current_user.id)
@@ -130,7 +131,7 @@ def get_single_shop(
     # 👤 Owner info
     owner = db.query(User).filter(User.id == shop.owner_id).first()
 
-    # 📊 Stats
+    # Stats
     total_cashiers = db.query(Cashier).filter(Cashier.shop_id == shop.id).count()
     active_cashiers = db.query(Cashier).filter(
         Cashier.shop_id == shop.id,
@@ -149,7 +150,7 @@ def get_single_shop(
         .scalar()
     )
 
-    # 📅 Today stats
+    # Today stats
     today = date.today()
 
     today_transactions = (
@@ -197,6 +198,142 @@ def get_single_shop(
         },
         message="Shop retrieved successfully"
     )
+
+@router.get("/{shop_id}/stats")
+def get_shop_stats(
+    shop_id: str,
+    start_date: str = Query(None, description="YYYY-MM-DD"),
+    end_date: str = Query(None, description="YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Permission check
+    cashier_shop_ids = (
+        db.query(Cashier.shop_id)
+        .filter(Cashier.user_id == current_user.id)
+        .subquery()
+    )
+
+    shop = (
+        db.query(Shop)
+        .filter(
+            Shop.id == shop_id,
+            or_(
+                Shop.owner_id == current_user.id,
+                Shop.id.in_(cashier_shop_ids)
+            )
+        )
+        .first()
+    )
+
+    if not shop:
+        raise HTTPException(status_code=403, detail="You do not have access to this shop")
+
+    # Date range
+    tx_filters = [Transaction.shop_id == shop_id]
+    float_filters = [FloatMovement.shop_id == shop_id]
+
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        tx_filters.append(Transaction.transaction_date >= start)
+        float_filters.append(FloatMovement.transaction_date >= start)
+
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        tx_filters.append(Transaction.transaction_date <= end)
+        float_filters.append(FloatMovement.transaction_date <= end)
+
+    # Transactions
+    total_transactions = db.query(Transaction).filter(*tx_filters).count()
+
+    total_transaction_amount = (
+        db.query(func.coalesce(func.sum(Transaction.amount), 0))
+        .filter(*tx_filters)
+        .scalar()
+    )
+
+    total_commissions = (
+        db.query(func.coalesce(func.sum(Transaction.commission), 0))
+        .filter(*tx_filters)
+        .scalar()
+    )
+
+    # Float movements
+    total_float_movements = db.query(FloatMovement).filter(*float_filters).count()
+
+    total_float_amount = (
+        db.query(func.coalesce(func.sum(FloatMovement.amount), 0))
+        .filter(*float_filters)
+        .scalar()
+    )
+
+    # Cash balance
+    cash_balance_obj = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
+    cash_balance = float(cash_balance_obj.balance) if cash_balance_obj else 0.0
+
+    # Float balances by category
+    float_balances = (
+        db.query(
+            FloatBalance.category,
+            func.coalesce(func.sum(FloatBalance.balance), 0)
+        )
+        .filter(FloatBalance.shop_id == shop_id)
+        .group_by(FloatBalance.category)
+        .all()
+    )
+
+    float_balance_map = {
+        fb.category.value: float(fb[1])
+        for fb in float_balances
+    }
+
+    # Commission by category
+    commission_by_category = (
+        db.query(
+            Transaction.category,
+            func.coalesce(func.sum(Transaction.commission), 0)
+        )
+        .filter(*tx_filters)
+        .group_by(Transaction.category)
+        .all()
+    )
+
+    commission_category_map = {
+        row.category.value: float(row[1])
+        for row in commission_by_category
+    }
+
+    # Transactions by type
+    transaction_by_type = (
+        db.query(
+            Transaction.type,
+            func.count(Transaction.id)
+        )
+        .filter(*tx_filters)
+        .group_by(Transaction.type)
+        .all()
+    )
+
+    transaction_type_map = {
+        row.type.value: row[1]
+        for row in transaction_by_type
+    }
+
+    return success_response(
+        data={
+            "total_transactions": total_transactions,
+            "total_transaction_amount": float(total_transaction_amount),
+            "total_commissions": float(total_commissions),
+            "total_float_movements": total_float_movements,
+            "total_float_amount": float(total_float_amount),
+            "cash_balance": cash_balance,
+            "float_balances": float_balance_map,
+            "commission_by_category": commission_category_map,
+            "transaction_by_type": transaction_type_map
+        },
+        message="Shop statistics retrieved successfully"
+    )
+
 
 @router.post("/")
 async def create_shop(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
