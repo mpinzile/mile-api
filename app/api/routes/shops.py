@@ -3,9 +3,9 @@
 from decimal import Decimal
 from fastapi import APIRouter, Query, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import date, datetime
 from app.db.get_db import get_db
 from app.models.cashier import Cashier
 from app.models.shop import Shop
@@ -18,6 +18,7 @@ from app.models.enums import Category
 from app.models.provider import Provider
 from app.models.cash_balance import CashBalance
 from app.models.super_agent import SuperAgent
+from app.models.transaction import Transaction
 
 router = APIRouter()
 
@@ -96,6 +97,105 @@ def list_shops(
             "total_items": total_items,
             "total_pages": total_pages
         }
+    )
+
+@router.get("/{shop_id}")
+def get_single_shop(
+    shop_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # 🔐 Permission check: owner OR cashier
+    cashier_shop_ids = (
+        db.query(Cashier.shop_id)
+        .filter(Cashier.user_id == current_user.id)
+        .subquery()
+    )
+
+    shop = (
+        db.query(Shop)
+        .filter(
+            Shop.id == shop_id,
+            or_(
+                Shop.owner_id == current_user.id,
+                Shop.id.in_(cashier_shop_ids)
+            )
+        )
+        .first()
+    )
+
+    if not shop:
+        raise HTTPException(status_code=403, detail="You do not have access to this shop")
+
+    # 👤 Owner info
+    owner = db.query(User).filter(User.id == shop.owner_id).first()
+
+    # 📊 Stats
+    total_cashiers = db.query(Cashier).filter(Cashier.shop_id == shop.id).count()
+    active_cashiers = db.query(Cashier).filter(
+        Cashier.shop_id == shop.id,
+        Cashier.is_active == True
+    ).count()
+
+    total_providers = db.query(Provider).filter(Provider.shop_id == shop.id).count()
+    total_super_agents = db.query(SuperAgent).filter(SuperAgent.shop_id == shop.id).count()
+
+    cash_balance_obj = db.query(CashBalance).filter(CashBalance.shop_id == shop.id).first()
+    cash_balance = float(cash_balance_obj.balance) if cash_balance_obj else 0.0
+
+    total_float_balance = (
+        db.query(func.coalesce(func.sum(Provider.opening_balance), 0))
+        .filter(Provider.shop_id == shop.id)
+        .scalar()
+    )
+
+    # 📅 Today stats
+    today = date.today()
+
+    today_transactions = (
+        db.query(Transaction)
+        .filter(
+            Transaction.shop_id == shop.id,
+            func.date(Transaction.transaction_date) == today
+        )
+        .count()
+    )
+
+    today_commissions = (
+        db.query(func.coalesce(func.sum(Transaction.commission), 0))
+        .filter(
+            Transaction.shop_id == shop.id,
+            func.date(Transaction.transaction_date) == today
+        )
+        .scalar()
+    )
+
+    return success_response(
+        data={
+            "id": str(shop.id),
+            "name": shop.name,
+            "location": shop.location,
+            "owner_id": str(shop.owner_id),
+            "is_active": getattr(shop, "is_active", True),
+            "created_at": shop.created_at.isoformat(),
+            "updated_at": shop.updated_at.isoformat(),
+            "owner": {
+                "id": str(owner.id),
+                "full_name": owner.full_name,
+                "email": owner.email
+            } if owner else None,
+            "stats": {
+                "total_cashiers": total_cashiers,
+                "active_cashiers": active_cashiers,
+                "total_providers": total_providers,
+                "total_super_agents": total_super_agents,
+                "cash_balance": cash_balance,
+                "total_float_balance": float(total_float_balance),
+                "today_transactions": today_transactions,
+                "today_commissions": float(today_commissions)
+            }
+        },
+        message="Shop retrieved successfully"
     )
 
 @router.post("/")
