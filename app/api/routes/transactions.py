@@ -17,6 +17,7 @@ from app.utils.error_codes import ERROR_CODES
 from app.core.config import WITHDRAWAL_TYPES
 
 router = APIRouter()
+
 @router.put("/{transaction_id}")
 async def update_transaction(
     transaction_id: str,
@@ -30,14 +31,14 @@ async def update_transaction(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Check if current user has access (owner or cashier of shop)
-    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+    # Only shop owner can update transaction
     shop = db.query(Shop).filter(
         Shop.id == transaction.shop_id,
-        (Shop.owner_id == current_user.id) | (Shop.id.in_(cashier_shop_ids))
+        Shop.owner_id == current_user.id
     ).first()
+
     if not shop:
-        raise HTTPException(status_code=403, detail="You do not have access to update this transaction")
+        raise HTTPException(status_code=403, detail="Only shop owner can update this transaction")
 
     # Fetch float & cash balances
     float_balance = db.query(FloatBalance).filter(
@@ -119,14 +120,14 @@ def delete_transaction(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Check access
-    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+   # Only shop owner can delete transaction
     shop = db.query(Shop).filter(
         Shop.id == transaction.shop_id,
-        (Shop.owner_id == current_user.id) | (Shop.id.in_(cashier_shop_ids))
+        Shop.owner_id == current_user.id
     ).first()
+
     if not shop:
-        raise HTTPException(status_code=403, detail="You do not have access to delete this transaction")
+        raise HTTPException(status_code=403, detail="Only shop owner can delete this transaction")
 
     # Reverse balances
     float_balance = db.query(FloatBalance).filter(
