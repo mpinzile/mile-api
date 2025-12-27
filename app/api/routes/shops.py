@@ -10,11 +10,11 @@ from app.db.get_db import get_db
 from app.models.cashier import Cashier
 from app.models.shop import Shop
 from app.models.user import User
-from app.utils.helpers import hash_password, success_response, error_response
+from app.utils.helpers import hash_password, success_response, error_response, update_balances, verify_shop_access
 from app.utils.auth import get_current_user
 from app.utils.error_codes import ERROR_CODES
 from app.utils.validation_functions import validate_email, validate_tanzanian_phone
-from app.models.enums import Category
+from app.models.enums import Category, FloatOperationType
 from app.models.provider import Provider
 from app.models.cash_balance import CashBalance
 from app.models.super_agent import SuperAgent
@@ -930,4 +930,86 @@ def list_transactions(
             "total_commission": float(total_commission),
             "transaction_count": total_items
         }
+    )
+
+@router.post("/shops/{shop_id}/float-movements/top-up")
+async def create_float_topup(shop_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    body = await request.json()
+
+    shop = db.query(Shop).filter(Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Optional: verify current_user is cashier or owner
+
+    movement = FloatMovement(
+        shop_id=shop_id,
+        provider_id=body["provider_id"],
+        super_agent_id=body["super_agent_id"],
+        recorded_by=current_user.id,
+        type=FloatOperationType.top_up,
+        category=body["category"],
+        amount=Decimal(body["amount"]),
+        reference=body["reference"],
+        is_new_capital=body.get("is_new_capital", False),
+        receipt_image_url=body.get("receipt_image"),
+        notes=body.get("notes"),
+        transaction_date=datetime.fromisoformat(body["transaction_date"])
+    )
+
+    db.add(movement)
+    db.commit()
+    db.refresh(movement)
+
+    balances = update_balances(db, shop_id, body["provider_id"], body["category"], Decimal(body["amount"]), "top_up")
+
+    return success_response(
+        data={
+            "id": str(movement.id),
+            "type": "top_up",
+            "category": movement.category,
+            "amount": float(movement.amount),
+            "is_new_capital": movement.is_new_capital,
+            "balance_updates": balances
+        },
+        message="Float top-up recorded successfully"
+    )
+
+@router.post("/{shop_id}/float-movements/withdraw")
+async def create_float_withdraw(shop_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    body = await request.json()
+
+    # Just verify access, no need to assign
+    verify_shop_access(db, shop_id, current_user)
+
+
+    movement = FloatMovement(
+        shop_id=shop_id,
+        provider_id=body["provider_id"],
+        super_agent_id=body["super_agent_id"],
+        recorded_by=current_user.id,
+        type=FloatOperationType.withdraw,
+        category=body["category"],
+        amount=Decimal(body["amount"]),
+        reference=body["reference"],
+        receipt_image_url=body.get("receipt_image"),
+        notes=body.get("notes"),
+        transaction_date=datetime.fromisoformat(body["transaction_date"])
+    )
+
+    db.add(movement)
+    db.commit()
+    db.refresh(movement)
+
+    balances = update_balances(db, shop_id, body["provider_id"], body["category"], Decimal(body["amount"]), "withdraw")
+
+    return success_response(
+        data={
+            "id": str(movement.id),
+            "type": "withdraw",
+            "category": movement.category,
+            "amount": float(movement.amount),
+            "balance_updates": balances
+        },
+        message="Float withdrawal recorded successfully"
     )
