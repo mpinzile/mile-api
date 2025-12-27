@@ -145,8 +145,8 @@ def get_single_shop(
     cash_balance = float(cash_balance_obj.balance) if cash_balance_obj else 0.0
 
     total_float_balance = (
-        db.query(func.coalesce(func.sum(Provider.opening_balance), 0))
-        .filter(Provider.shop_id == shop.id)
+        db.query(func.coalesce(func.sum(FloatBalance.balance), 0))
+        .filter(FloatBalance.shop_id == shop.id)
         .scalar()
     )
 
