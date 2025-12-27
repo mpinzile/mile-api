@@ -36,7 +36,12 @@ def get_cashier(cashier_id: str, db: Session = Depends(get_db), current_user: Us
     )
 
 @router.put("/{cashier_id}")
-async def update_cashier(cashier_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_cashier(
+    cashier_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     body = await request.json()
     cashier = db.query(Cashier).filter(Cashier.id == cashier_id).first()
     if not cashier:
@@ -44,28 +49,43 @@ async def update_cashier(cashier_id: str, request: Request, db: Session = Depend
 
     if "name" in body:
         cashier.user.full_name = body["name"]
+
     if "email" in body:
-        if not validate_email(body["email"]):
+        new_email = body["email"]
+        if not validate_email(new_email):
             return JSONResponse(
                 status_code=400,
                 content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Invalid email format")
             )
-        cashier.user.email = body["email"]
+        # Check if email already exists
+        if db.query(User).filter(User.email == new_email, User.id != cashier.user_id).first():
+            return JSONResponse(
+                status_code=400,
+                content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Email already exists")
+            )
+        cashier.user.email = new_email
+
     if "phone" in body:
         try:
-            cashier.user.phone = validate_tanzanian_phone(body["phone"])
+            new_phone = validate_tanzanian_phone(body["phone"])
         except ValueError as e:
             return JSONResponse(
                 status_code=400,
                 content=error_response(ERROR_CODES["VALIDATION_ERROR"], str(e))
             )
+        # Check if phone already exists
+        if db.query(User).filter(User.phone == new_phone, User.id != cashier.user_id).first():
+            return JSONResponse(
+                status_code=400,
+                content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Phone already exists")
+            )
+        cashier.user.phone = new_phone
 
     cashier.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(cashier)
 
     return success_response(message="Cashier updated successfully")
-
 
 @router.post("/{cashier_id}/reset-password")
 async def reset_cashier_password(cashier_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
