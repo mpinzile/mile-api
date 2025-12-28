@@ -11,7 +11,7 @@ from app.utils.auth import get_current_user
 from app.models.user import User
 from app.utils.helpers import success_response, error_response, verify_shop_access
 from app.utils.error_codes import ERROR_CODES
-from models.float import FloatBalance
+from app.models.float import FloatBalance
 
 router = APIRouter()
 

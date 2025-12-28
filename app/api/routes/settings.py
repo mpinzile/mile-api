@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from app.models.user_setting import UserSetting
 from app.models.user import User
-from db import get_db
-from utils.auth import get_current_user
-from utils.helpers import success_response
+from app.db.get_db import get_db
+from app.utils.auth import get_current_user
+from app.utils.helpers import success_response
 
 router = APIRouter()
 
