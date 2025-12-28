@@ -1013,3 +1013,175 @@ async def create_float_withdraw(shop_id: str, request: Request, db: Session = De
         },
         message="Float withdrawal recorded successfully"
     )
+
+@router.get("/{shop_id}/balances")
+def get_shop_balances(
+    shop_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    verify_shop_access(db, shop_id, current_user)
+
+    cash = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
+    if not cash:
+        cash = CashBalance(shop_id=shop_id)
+        db.add(cash)
+        db.commit()
+        db.refresh(cash)
+
+    float_rows = (
+        db.query(FloatBalance, Provider)
+        .join(Provider, Provider.id == FloatBalance.provider_id)
+        .filter(FloatBalance.shop_id == shop_id)
+        .all()
+    )
+
+    float_data = []
+    total_mobile = 0
+    total_bank = 0
+
+    for fb, provider in float_rows:
+        balance = float(fb.balance)
+        if provider.category.value == "mobile":
+            total_mobile += balance
+        else:
+            total_bank += balance
+
+        float_data.append({
+            "provider_id": str(provider.id),
+            "provider_name": provider.name,
+            "category": provider.category.value,
+            "balance": balance,
+            "opening_balance": float(provider.opening_balance),
+            "last_updated": fb.last_updated.isoformat()
+        })
+
+    total_float = total_mobile + total_bank
+    total_cash = float(cash.balance)
+
+    return success_response(
+        data={
+            "cash_balance": {
+                "balance": total_cash,
+                "opening_balance": float(cash.opening_balance),
+                "last_updated": cash.last_updated.isoformat()
+            },
+            "float_balances": float_data,
+            "totals": {
+                "total_cash": total_cash,
+                "total_mobile_float": total_mobile,
+                "total_bank_float": total_bank,
+                "total_float": total_float,
+                "grand_total": total_cash + total_float
+            }
+        }
+    )
+
+
+@router.get("/{shop_id}/balances/cash")
+def get_cash_balance(
+    shop_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    verify_shop_access(db, shop_id, current_user)
+
+    cash = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
+    if not cash:
+        cash = CashBalance(shop_id=shop_id)
+        db.add(cash)
+        db.commit()
+        db.refresh(cash)
+
+    return success_response(
+        data={
+            "balance": float(cash.balance),
+            "opening_balance": float(cash.opening_balance),
+            "last_updated": cash.last_updated.isoformat()
+        }
+    )
+
+@router.put("/{shop_id}/balances/cash")
+async def set_cash_opening_balance(
+    shop_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    verify_shop_access(db, shop_id, current_user)
+
+    body = await request.json()
+    try:
+        opening_balance = Decimal(body["opening_balance"])
+    except:
+        raise HTTPException(status_code=400, detail="Invalid opening_balance")
+
+    cash = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
+    if not cash:
+        cash = CashBalance(shop_id=shop_id)
+
+    cash.opening_balance = opening_balance
+    cash.balance = opening_balance
+    cash.last_updated = datetime.utcnow()
+
+    db.add(cash)
+    db.commit()
+    db.refresh(cash)
+
+    return success_response(
+        data={
+            "balance": float(cash.balance),
+            "opening_balance": float(cash.opening_balance),
+            "last_updated": cash.last_updated.isoformat()
+        },
+        message="Cash opening balance set successfully"
+    )
+
+@router.post("/{shop_id}/balances/cash/adjust")
+async def adjust_cash_balance(
+    shop_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    verify_shop_access(db, shop_id, current_user)
+
+    body = await request.json()
+
+    try:
+        amount = Decimal(body["amount"])
+        if amount <= 0:
+            raise ValueError
+    except:
+        raise HTTPException(status_code=400, detail="Invalid amount")
+
+    adjustment_type = body.get("adjustment_type")
+    if adjustment_type not in ["add", "subtract"]:
+        raise HTTPException(status_code=400, detail="Invalid adjustment_type")
+
+    cash = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
+    if not cash:
+        cash = CashBalance(shop_id=shop_id)
+        db.add(cash)
+
+    previous = float(cash.balance)
+
+    if adjustment_type == "add":
+        cash.balance += amount
+    else:
+        cash.balance -= amount
+
+    cash.last_updated = datetime.utcnow()
+
+    db.commit()
+    db.refresh(cash)
+
+    return success_response(
+        data={
+            "previous_balance": previous,
+            "current_balance": float(cash.balance),
+            "change": float(cash.balance - previous),
+            "reason": body.get("reason")
+        },
+        message="Cash balance adjusted successfully"
+    )
