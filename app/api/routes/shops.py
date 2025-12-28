@@ -1240,14 +1240,14 @@ def get_dashboard(
 
     float_top_ups = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
         FloatMovement.shop_id == shop_id,
-        FloatMovement.type == FloatMovement.type.top_up,
+        FloatMovement.type == FloatOperationType.top_up,  
         FloatMovement.transaction_date >= start,
         FloatMovement.transaction_date <= end
     ).scalar() or 0
 
     float_withdrawals = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
         FloatMovement.shop_id == shop_id,
-        FloatMovement.type == FloatMovement.type.withdraw,
+        FloatMovement.type == FloatOperationType.withdraw,  
         FloatMovement.transaction_date >= start,
         FloatMovement.transaction_date <= end
     ).scalar() or 0
