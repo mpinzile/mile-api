@@ -14,10 +14,12 @@ from app.models.float import FloatBalance
 from app.models.cashier import Cashier
 from app.models.shop import Shop
 
-def success_response(data=None, message="Operation successful", pagination=None):
+def success_response(data=None, message="Operation successful", pagination=None, summary=None):
     response = {"success": True, "data": data, "message": message}
     if pagination is not None:
         response["pagination"] = pagination
+    if summary is not None:
+        response["summary"] = summary
     return response
 
 

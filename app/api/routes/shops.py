@@ -36,10 +36,8 @@ def list_shops(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Get shop IDs where user is a cashier
     cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
 
-    # Query shops: either owned or where user is cashier
     query = db.query(Shop).filter(
         or_(
             Shop.owner_id == current_user.id,
