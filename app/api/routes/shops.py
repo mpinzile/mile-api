@@ -646,6 +646,7 @@ async def create_provider(
             content=error_response(ERROR_CODES["VALIDATION_ERROR"], "Invalid opening_balance")
         )
 
+    # Create provider
     provider = Provider(
         shop_id=shop_id,
         name=name,
@@ -659,6 +660,18 @@ async def create_provider(
     db.commit()
     db.refresh(provider)
 
+    # Create initial float balance
+    float_balance = FloatBalance(
+        shop_id=shop_id,
+        provider_id=provider.id,
+        category=Category[category],
+        balance=opening_balance,
+        last_updated=datetime.utcnow()
+    )
+    db.add(float_balance)
+    db.commit()
+    db.refresh(float_balance)
+
     return success_response(
         data={
             "id": str(provider.id),
@@ -667,6 +680,10 @@ async def create_provider(
             "category": provider.category.value,
             "agent_code": provider.agent_code,
             "opening_balance": float(provider.opening_balance),
+            "float_balance": {
+                "balance": float(float_balance.balance),
+                "last_updated": float_balance.last_updated.isoformat()
+            },
             "created_at": provider.created_at.isoformat(),
             "updated_at": provider.updated_at.isoformat()
         },
