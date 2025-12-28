@@ -5,6 +5,8 @@ import hashlib
 from http.client import HTTPException
 import random
 import uuid
+
+import requests
 from app.core.config import REFRESH_TOKEN_EXPIRE_DAYS
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -140,3 +142,38 @@ def verify_shop_access(db: Session, shop_id: str, current_user: User):
         raise HTTPException(status_code=403, detail="You do not have access to this shop")
 
     return shop
+
+def send_verification_email(to_email: str, code: str, first_name: str = ""):
+    """
+    Sends verification code email via PHP API.
+    Works like password reset email:
+      - completes silently on success
+      - raises exception on failure
+    """
+    payload = {
+        "to_email": to_email,
+        "code": code,
+        "first_name": first_name
+    }
+
+    try:
+        response = requests.post(
+            "https://api.sewmrtechnologies.com/mail/mile/send-password-reset-request.php",
+            json=payload,
+            timeout=10
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not result.get("success"):
+            raise Exception(result.get("message", "Failed to send verification email"))
+    except Exception as e:
+        print("Failed to send verification email:", e)
+        raise e
+
+def generate_reset_code(length: int = 6) -> str:
+    """
+    Generate an uppercase alphanumeric reset code, excluding ambiguous characters.
+    Example: AB9XQ2
+    """
+    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(random.choices(chars, k=length))

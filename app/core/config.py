@@ -26,3 +26,4 @@ if APP_ENV == "production":
 else:
     COOKIE_DOMAIN = None 
 WITHDRAWAL_TYPES = [TransactionType.withdrawal.value, TransactionType.bank_withdrawal.value]
+RESET_PASSWORD_CODE_EXPIRE_MINUTES = 15
