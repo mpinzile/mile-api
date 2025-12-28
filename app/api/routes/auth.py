@@ -343,3 +343,67 @@ async def update_profile(
     db.refresh(user)
 
     return success_response(message="Profile updated successfully")
+
+@router.post("/change-password")
+async def change_password(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    body = await request.json()
+    current_password = body.get("current_password")
+    new_password = body.get("new_password")
+
+    if not current_password or not new_password:
+        return JSONResponse(
+            status_code=400,
+            content=error_response(
+                ERROR_CODES["VALIDATION_ERROR"],
+                "Current password and new password are required"
+            )
+        )
+
+    # Verify current password
+    if current_user.hashed_password != hash_password(current_password):
+        return JSONResponse(
+            status_code=401,
+            content=error_response(
+                ERROR_CODES["FORBIDDEN"],
+                "Current password is incorrect"
+            )
+        )
+
+    # Validate new password strength
+    if not validate_password_strength(new_password):
+        return JSONResponse(
+            status_code=400,
+            content=error_response(
+                ERROR_CODES["VALIDATION_ERROR"],
+                "New password is too weak"
+            )
+        )
+
+    # Prevent reuse of same password
+    if hash_password(new_password) == current_user.hashed_password:
+        return JSONResponse(
+            status_code=400,
+            content=error_response(
+                ERROR_CODES["VALIDATION_ERROR"],
+                "New password must be different from current password"
+            )
+        )
+
+    # Update password
+    current_user.hashed_password = hash_password(new_password)
+    current_user.updated_at = datetime.utcnow()
+
+    # Invalidate old refresh tokens
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == current_user.id
+    ).delete()
+
+    db.commit()
+
+    return success_response(
+        message="Password changed successfully"
+    )

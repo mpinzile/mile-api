@@ -8,9 +8,11 @@ from app.models.cashier import Cashier
 from app.models.user import User
 from app.models.shop import Shop
 from app.utils.helpers import hash_password, success_response, error_response
-from app.utils.validation_functions import validate_email, validate_tanzanian_phone
+from app.utils.validation_functions import validate_email, validate_password_strength, validate_tanzanian_phone
 from app.utils.auth import get_current_user
 from app.utils.error_codes import ERROR_CODES
+from app.models.enums import AppRole
+from app.models.refresh_token import RefreshToken
 
 router = APIRouter()
 
@@ -134,3 +136,86 @@ def delete_cashier(cashier_id: str, db: Session = Depends(get_db), current_user:
     db.delete(cashier)
     db.commit()
     return success_response(message="Cashier deleted successfully")
+
+@router.post("/{cashier_id}/reset-password")
+async def reset_cashier_password(
+    cashier_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Only superadmin allowed
+    if current_user.role != AppRole.superadmin:
+        return JSONResponse(
+            status_code=403,
+            content=error_response(
+                ERROR_CODES["FORBIDDEN"],
+                "You are not authorized to reset cashier passwords"
+            )
+        )
+
+    body = await request.json()
+    new_password = body.get("new_password")
+
+    if not new_password:
+        return JSONResponse(
+            status_code=400,
+            content=error_response(
+                ERROR_CODES["VALIDATION_ERROR"],
+                "New password is required"
+            )
+        )
+
+    if not validate_password_strength(new_password):
+        return JSONResponse(
+            status_code=400,
+            content=error_response(
+                ERROR_CODES["VALIDATION_ERROR"],
+                "Password is too weak"
+            )
+        )
+
+    # Find cashier profile
+    cashier = db.query(Cashier).filter(
+        Cashier.id == cashier_id,
+        Cashier.is_active.is_(True)
+    ).first()
+
+    if not cashier:
+        return JSONResponse(
+            status_code=404,
+            content=error_response(
+                ERROR_CODES["NOT_FOUND"],
+                "Cashier not found"
+            )
+        )
+
+    # Load user
+    cashier_user = db.query(User).filter(
+        User.id == cashier.user_id,
+        User.deleted_at.is_(None)
+    ).first()
+
+    if not cashier_user or cashier_user.role != AppRole.cashier:
+        return JSONResponse(
+            status_code=400,
+            content=error_response(
+                ERROR_CODES["VALIDATION_ERROR"],
+                "User is not a cashier"
+            )
+        )
+
+    # Update password
+    cashier_user.hashed_password = hash_password(new_password)
+    cashier_user.updated_at = datetime.utcnow()
+
+    # Invalidate all cashier sessions
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == cashier_user.id
+    ).delete()
+
+    db.commit()
+
+    return success_response(
+        message="Cashier password reset successfully"
+    )
