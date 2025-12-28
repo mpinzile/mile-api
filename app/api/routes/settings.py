@@ -9,7 +9,7 @@ from app.utils.helpers import success_response
 
 router = APIRouter()
 
-@router.get("/settings")
+@router.get("/")
 def get_user_settings_endpoint(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     settings = db.query(UserSetting).filter(UserSetting.user_id == current_user.id).first()
 
@@ -45,7 +45,7 @@ def get_user_settings_endpoint(db: Session = Depends(get_db), current_user: User
     )
 
 
-@router.put("/settings")
+@router.put("/")
 async def update_user_settings(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     body = await request.json()
     settings = db.query(UserSetting).filter(UserSetting.user_id == current_user.id).first()
