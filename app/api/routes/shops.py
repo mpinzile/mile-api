@@ -559,6 +559,58 @@ async def create_cashier(shop_id: str, request: Request, db: Session = Depends(g
         message="Cashier created successfully"
     )
 
+# --- List providers for a shop ---
+@router.get("/{shop_id}/providers")
+def list_providers(
+    shop_id: str,
+    category: str = Query(None, regex="^(mobile|bank)$"),
+    search: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verify current_user has access to shop
+    verify_shop_access(db, shop_id, current_user)
+
+    query = db.query(Provider).filter(Provider.shop_id == shop_id)
+
+    if category:
+        query = query.filter(Provider.category == Category(category))
+
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(or_(
+            Provider.name.ilike(search_pattern),
+            Provider.agent_code.ilike(search_pattern)
+        ))
+
+    providers = query.order_by(Provider.name.asc()).all()
+
+    data = []
+    for prov in providers:
+        float_balance = db.query(FloatBalance).filter_by(
+            shop_id=prov.shop_id,
+            provider_id=prov.id,
+            category=prov.category
+        ).first()
+
+        data.append({
+            "id": str(prov.id),
+            "name": prov.name,
+            "category": prov.category.value,
+            "agent_code": prov.agent_code,
+            "shop_id": str(prov.shop_id),
+            "opening_balance": float(prov.opening_balance),
+            "created_at": prov.created_at.isoformat(),
+            "updated_at": prov.updated_at.isoformat(),
+            "float_balance": {
+                "balance": float(float_balance.balance) if float_balance else 0.0,
+                "last_updated": float_balance.last_updated.isoformat() if float_balance else None
+            }
+        })
+
+    return success_response(data=data, message="Providers retrieved successfully")
+
+
 @router.post("/{shop_id}/providers")
 async def create_provider(
     shop_id: str,
