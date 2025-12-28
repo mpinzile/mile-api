@@ -1214,10 +1214,12 @@ async def adjust_cash_balance(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Verify the user has access to the shop
     verify_shop_access(db, shop_id, current_user)
 
     body = await request.json()
 
+    # Validate amount
     try:
         amount = Decimal(body["amount"])
         if amount <= 0:
@@ -1225,17 +1227,22 @@ async def adjust_cash_balance(
     except:
         raise HTTPException(status_code=400, detail="Invalid amount")
 
+    # Validate adjustment type
     adjustment_type = body.get("adjustment_type")
     if adjustment_type not in ["add", "subtract"]:
         raise HTTPException(status_code=400, detail="Invalid adjustment_type")
 
+    # Fetch or create CashBalance
     cash = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
     if not cash:
-        cash = CashBalance(shop_id=shop_id)
+        cash = CashBalance(shop_id=shop_id, balance=Decimal(0))
         db.add(cash)
+        db.commit()
+        db.refresh(cash)
 
-    previous = float(cash.balance)
+    previous = cash.balance  # Keep as Decimal
 
+    # Apply adjustment
     if adjustment_type == "add":
         cash.balance += amount
     else:
@@ -1248,7 +1255,7 @@ async def adjust_cash_balance(
 
     return success_response(
         data={
-            "previous_balance": previous,
+            "previous_balance": float(previous),
             "current_balance": float(cash.balance),
             "change": float(cash.balance - previous),
             "reason": body.get("reason")
