@@ -177,3 +177,14 @@ def generate_reset_code(length: int = 6) -> str:
     """
     chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "".join(random.choices(chars, k=length))
+
+def mask_email(email: str) -> str:
+    try:
+        local, domain = email.split("@")
+        if len(local) <= 2:
+            local_masked = local[0] + "***"
+        else:
+            local_masked = local[0] + "***" + local[-1]
+        return f"{local_masked}@{domain}"
+    except Exception:
+        return "***"
