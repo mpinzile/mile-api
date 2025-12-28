@@ -51,6 +51,29 @@ CREATE TABLE public.users (
   deleted_at timestamptz
 );
 
+CREATE TABLE public.password_reset_tokens (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+    reset_code_hash text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    max_attempts integer DEFAULT 5 NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL
+);
+
+
+CREATE TABLE public.password_reset_history (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+    success boolean NOT NULL,
+    ip_address inet,
+    user_agent text,
+    attempted_code text,
+    created_at timestamptz DEFAULT now() NOT NULL
+);
+
+
 -- REFRESH TOKENS
 CREATE TABLE public.refresh_tokens (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
