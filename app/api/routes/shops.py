@@ -932,7 +932,7 @@ def list_transactions(
         }
     )
 
-@router.post("/shops/{shop_id}/float-movements/top-up")
+@router.post("/{shop_id}/float-movements/top-up")
 async def create_float_topup(shop_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     body = await request.json()
 
@@ -940,7 +940,7 @@ async def create_float_topup(shop_id: str, request: Request, db: Session = Depen
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    # Optional: verify current_user is cashier or owner
+    verify_shop_access(db, shop_id, current_user)
 
     movement = FloatMovement(
         shop_id=shop_id,
@@ -961,7 +961,7 @@ async def create_float_topup(shop_id: str, request: Request, db: Session = Depen
     db.commit()
     db.refresh(movement)
 
-    balances = update_balances(db, shop_id, body["provider_id"], body["category"], Decimal(body["amount"]), "top_up")
+    balances = update_balances(db, shop_id, body["provider_id"], body["category"], Decimal(body["amount"]), "top_up", movement.is_new_capital)
 
     return success_response(
         data={

@@ -67,7 +67,7 @@ def create_refresh_token_entry(user: User, db: Session) -> str:
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
-def update_balances(db: Session, shop_id: str, provider_id: str, category: str, amount: Decimal, operation: str):
+def update_balances(db: Session, shop_id: str, provider_id: str, category: str, amount: Decimal, operation: str, is_new_capital: bool = False):
     # Update float balance
     float_balance = db.query(FloatBalance).filter_by(
         shop_id=shop_id, provider_id=provider_id, category=category
@@ -88,10 +88,12 @@ def update_balances(db: Session, shop_id: str, provider_id: str, category: str, 
 
     if operation == "top_up":
         float_balance.balance += amount
-        cash_balance.balance -= amount
+        if not is_new_capital:  # only decrement cash if NOT new capital
+            cash_balance.balance -= amount
     elif operation == "withdraw":
         float_balance.balance -= amount
         cash_balance.balance += amount
+
 
     float_balance.last_updated = datetime.utcnow()
     cash_balance.last_updated = datetime.utcnow()

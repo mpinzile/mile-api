@@ -24,12 +24,13 @@ async def update_float_movement(movement_id: str, request: Request, db: Session 
     
     prev_amount = float(movement.amount)
     operation_type = movement.type
+    is_new_capital = movement.is_new_capital
 
     # Reverse previous effect
     if operation_type == FloatOperationType.top_up:
         update_balances(db, movement.shop_id, movement.provider_id, movement.category, Decimal(prev_amount), "withdraw")
     else:
-        update_balances(db, movement.shop_id, movement.provider_id, movement.category, Decimal(prev_amount), "top_up")
+        update_balances(db, movement.shop_id, movement.provider_id, movement.category, Decimal(prev_amount), "top_up", is_new_capital)
 
     # Apply new values
     new_amount = Decimal(body.get("amount", movement.amount))
@@ -43,7 +44,7 @@ async def update_float_movement(movement_id: str, request: Request, db: Session 
 
     # Apply new effect
     if operation_type == FloatOperationType.top_up:
-        balances = update_balances(db, movement.shop_id, movement.provider_id, movement.category, new_amount, "top_up")
+        balances = update_balances(db, movement.shop_id, movement.provider_id, movement.category, new_amount, "top_up", is_new_capital)
     else:
         balances = update_balances(db, movement.shop_id, movement.provider_id, movement.category, new_amount, "withdraw")
 
