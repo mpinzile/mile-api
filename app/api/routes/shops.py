@@ -1420,3 +1420,105 @@ def get_dashboard(
             "top_providers": top_providers_list
         }
     )
+
+@router.get("/{shop_id}/float-movements")
+def list_float_movements(
+    shop_id: str,
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    type: str = Query(None),
+    category: str = Query(None),
+    provider_id: str = Query(None),
+    super_agent_id: str = Query(None),
+    start_date: str = Query(None),
+    end_date: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Check user access: owner or cashier
+    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+    shop = db.query(Shop).filter(
+        Shop.id == shop_id,
+        or_(Shop.owner_id == current_user.id, Shop.id.in_(cashier_shop_ids))
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=403, detail="You do not have access to this shop")
+
+    query = db.query(FloatMovement).filter(FloatMovement.shop_id == shop_id)
+
+    # Apply filters
+    if type:
+        query = query.filter(FloatMovement.type == type)
+    if category:
+        query = query.filter(FloatMovement.category == category)
+    if provider_id:
+        query = query.filter(FloatMovement.provider_id == provider_id)
+    if super_agent_id:
+        query = query.filter(FloatMovement.super_agent_id == super_agent_id)
+    if start_date:
+        query = query.filter(FloatMovement.transaction_date >= datetime.fromisoformat(start_date))
+    if end_date:
+        query = query.filter(FloatMovement.transaction_date <= datetime.fromisoformat(end_date))
+
+    # Sorting by transaction_date desc by default
+    query = query.order_by(desc(FloatMovement.transaction_date))
+
+    total_items = query.count()
+    total_pages = (total_items + limit - 1) // limit
+    movements = query.offset((page - 1) * limit).limit(limit).all()
+
+    data = []
+    total_top_ups = Decimal(0)
+    total_withdrawals = Decimal(0)
+
+    for mv in movements:
+        provider = db.query(Provider).filter(Provider.id == mv.provider_id).first()
+        super_agent = db.query(SuperAgent).filter(SuperAgent.id == mv.super_agent_id).first()
+
+        if mv.type == "top_up":
+            total_top_ups += mv.amount
+        elif mv.type == "withdraw":
+            total_withdrawals += mv.amount
+
+        data.append({
+            "id": str(mv.id),
+            "type": mv.type,
+            "category": mv.category.value,
+            "amount": float(mv.amount),
+            "reference": mv.reference,
+            "is_new_capital": mv.is_new_capital,
+            "receipt_image": mv.receipt_image_url,
+            "notes": mv.notes,
+            "shop_id": str(mv.shop_id),
+            "provider_id": str(mv.provider_id),
+            "super_agent_id": str(mv.super_agent_id),
+            "transaction_date": mv.transaction_date.isoformat(),
+            "created_at": mv.created_at.isoformat(),
+            "updated_at": mv.updated_at.isoformat(),
+            "provider": {
+                "id": str(provider.id),
+                "name": provider.name
+            } if provider else None,
+            "super_agent": {
+                "id": str(super_agent.id),
+                "name": super_agent.name
+            } if super_agent else None
+        })
+
+    net_movement = total_top_ups - total_withdrawals
+
+    return success_response(
+        data=data,
+        pagination={
+            "page": page,
+            "limit": limit,
+            "total_items": total_items,
+            "total_pages": total_pages
+        },
+        summary={
+            "total_top_ups": float(total_top_ups),
+            "total_withdrawals": float(total_withdrawals),
+            "net_movement": float(net_movement)
+        }
+    )
