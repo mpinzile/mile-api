@@ -803,24 +803,24 @@ async def create_transaction(
             shop_id=shop_id,
             provider_id=provider.id,
             category=body["category"],
-            balance=0,
+            balance=Decimal("0"),
             last_updated=datetime.utcnow()
         )
         db.add(float_balance_obj)
         db.commit()
         db.refresh(float_balance_obj)
 
-    prev_float = float(float_balance_obj.balance)
+    prev_float = float_balance_obj.balance  # Keep as Decimal
 
     # Fetch or create CashBalance for the shop
     cash_balance_obj = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
     if not cash_balance_obj:
-        cash_balance_obj = CashBalance(shop_id=shop_id, balance=0)
+        cash_balance_obj = CashBalance(shop_id=shop_id, balance=Decimal("0"))
         db.add(cash_balance_obj)
         db.commit()
         db.refresh(cash_balance_obj)
 
-    prev_cash = float(cash_balance_obj.balance)
+    prev_cash = cash_balance_obj.balance  # Keep as Decimal
 
     txn_type = body["type"]
 
@@ -873,12 +873,12 @@ async def create_transaction(
             "created_at": transaction.created_at.isoformat(),
             "balance_updates": {
                 "float_balance": {
-                    "previous": prev_float,
+                    "previous": float(prev_float),
                     "current": float(float_balance_obj.balance),
                     "change": float(float_balance_obj.balance - prev_float)
                 },
                 "cash_balance": {
-                    "previous": prev_cash,
+                    "previous": float(prev_cash),
                     "current": float(cash_balance_obj.balance),
                     "change": float(cash_balance_obj.balance - prev_cash)
                 }
