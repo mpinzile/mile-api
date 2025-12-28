@@ -3,7 +3,7 @@
 from decimal import Decimal
 from fastapi import APIRouter, Query, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import asc, desc, func, or_
+from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
 from app.db.get_db import get_db
@@ -754,10 +754,13 @@ async def create_transaction(
         return error_response(ERROR_CODES["VALIDATION_ERROR"], "Missing required fields")
 
     # Validate shop access (owner or cashier)
-    cashier_shop_ids = db.query(Cashier.shop_id).filter(Cashier.user_id == current_user.id).subquery()
+    cashier_shop_ids = select(Cashier.shop_id).where(Cashier.user_id == current_user.id)
     shop = db.query(Shop).filter(
         Shop.id == shop_id,
-        Shop.id.in_(cashier_shop_ids) | (Shop.owner_id == current_user.id)
+        or_(
+            Shop.id.in_(cashier_shop_ids),
+            Shop.owner_id == current_user.id
+        )
     ).first()
     if not shop:
         raise HTTPException(status_code=403, detail="You do not have access to this shop")

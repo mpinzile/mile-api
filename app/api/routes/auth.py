@@ -254,7 +254,13 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
 
 
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shop_id = None
+    if user.role == AppRole.cashier:
+        cashier = db.query(Cashier).filter(Cashier.user_id == user.id).first()
+        if cashier:
+            shop_id = str(cashier.shop_id)
+
     return success_response(
         data={
             "id": str(user.id),
@@ -263,11 +269,12 @@ def me(user: User = Depends(get_current_user)):
             "phone": user.phone,
             "avatar_url": None,
             "role": user.role.value,
-            "shop_id": None,
+            "shop_id": shop_id,
             "created_at": user.created_at.isoformat(),
             "updated_at": user.updated_at.isoformat()
         }
     )
+
 
 
 @router.put("/me")
