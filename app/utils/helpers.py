@@ -78,7 +78,7 @@ def update_balances(db: Session, shop_id: str, provider_id: str, category: str, 
         float_balance = FloatBalance(shop_id=shop_id, provider_id=provider_id, category=category, balance=0)
         db.add(float_balance)
 
-    prev_float = float(float_balance.balance)
+    prev_float = float_balance.balance 
 
     # Update cash balance
     cash_balance = db.query(CashBalance).filter_by(shop_id=shop_id).first()
@@ -86,7 +86,7 @@ def update_balances(db: Session, shop_id: str, provider_id: str, category: str, 
         cash_balance = CashBalance(shop_id=shop_id, balance=0, opening_balance=0)
         db.add(cash_balance)
 
-    prev_cash = float(cash_balance.balance)
+    prev_cash = cash_balance.balance  
 
     if operation == "top_up":
         float_balance.balance += amount
@@ -96,7 +96,6 @@ def update_balances(db: Session, shop_id: str, provider_id: str, category: str, 
         float_balance.balance -= amount
         cash_balance.balance += amount
 
-
     float_balance.last_updated = datetime.utcnow()
     cash_balance.last_updated = datetime.utcnow()
     db.commit()
@@ -104,9 +103,18 @@ def update_balances(db: Session, shop_id: str, provider_id: str, category: str, 
     db.refresh(cash_balance)
 
     return {
-        "float_balance": {"previous": prev_float, "current": float(float_balance.balance), "change": float(float_balance.balance - prev_float)},
-        "cash_balance": {"previous": prev_cash, "current": float(cash_balance.balance), "change": float(cash_balance.balance - prev_cash)}
+        "float_balance": {
+            "previous": float(prev_float),
+            "current": float(float_balance.balance),
+            "change": float(float_balance.balance - prev_float)
+        },
+        "cash_balance": {
+            "previous": float(prev_cash),
+            "current": float(cash_balance.balance),
+            "change": float(cash_balance.balance - prev_cash)
+        }
     }
+
 
 def verify_shop_access(db: Session, shop_id: str, current_user: User):
     """
