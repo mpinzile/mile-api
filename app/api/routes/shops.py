@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from app.db.get_db import get_db
 from app.models.cashier import Cashier
 from app.models.shop import Shop
@@ -1184,4 +1184,162 @@ async def adjust_cash_balance(
             "reason": body.get("reason")
         },
         message="Cash balance adjusted successfully"
+    )
+
+@router.get("/{shop_id}/dashboard")
+def get_dashboard(
+    shop_id: str,
+    period: str = Query("today", regex="^(today|week|month)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Check shop exists
+    shop = db.query(Shop).filter(Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Determine period range
+    now = datetime.utcnow()
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
+        start = now - timedelta(days=now.weekday())  # start of week
+        start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    end = now
+
+    # --- Balances ---
+    cash_balance_obj = db.query(CashBalance).filter(CashBalance.shop_id == shop_id).first()
+    cash_balance = float(cash_balance_obj.balance) if cash_balance_obj else 0.0
+
+    float_balances = db.query(FloatBalance).filter(FloatBalance.shop_id == shop_id).all()
+    mobile_float = sum([float(f.balance) for f in float_balances if f.category.value == "mobile"])
+    bank_float = sum([float(f.balance) for f in float_balances if f.category.value == "bank"])
+    total_balance = cash_balance + mobile_float + bank_float
+
+    # --- Today/period summary ---
+    txn_summary = db.query(
+        func.count(Transaction.id),
+        func.coalesce(func.sum(Transaction.amount), 0),
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date <= end
+    ).first()
+    transactions_count, transaction_amount, commissions = txn_summary
+
+    # Float top-ups and withdrawals
+    float_summary = db.query(
+        func.coalesce(func.sum(FloatMovement.amount), 0),
+        func.coalesce(func.sum(FloatMovement.amount), 0)
+    ).filter(
+        FloatMovement.shop_id == shop_id,
+        FloatMovement.transaction_date >= start,
+        FloatMovement.transaction_date <= end
+    ).all()
+
+    float_top_ups = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
+        FloatMovement.shop_id == shop_id,
+        FloatMovement.type == FloatMovement.type.top_up,
+        FloatMovement.transaction_date >= start,
+        FloatMovement.transaction_date <= end
+    ).scalar() or 0
+
+    float_withdrawals = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
+        FloatMovement.shop_id == shop_id,
+        FloatMovement.type == FloatMovement.type.withdraw,
+        FloatMovement.transaction_date >= start,
+        FloatMovement.transaction_date <= end
+    ).scalar() or 0
+
+    # --- Growth: previous period same length ---
+    period_length = end - start
+    prev_start = start - period_length
+    prev_end = start
+
+    prev_summary = db.query(
+        func.count(Transaction.id),
+        func.coalesce(func.sum(Transaction.amount), 0),
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= prev_start,
+        Transaction.transaction_date <= prev_end
+    ).first()
+    prev_count, _, prev_commission = prev_summary
+
+    def calc_percentage(current, previous):
+        if previous == 0:
+            return 100.0 if current > 0 else 0.0
+        return round(((current - previous) / previous) * 100, 2)
+
+    # --- Recent transactions ---
+    recent_transactions = db.query(Transaction).filter(
+        Transaction.shop_id == shop_id
+    ).order_by(desc(Transaction.created_at)).limit(5).all()
+
+    recent_txns_list = [
+        {
+            "id": str(txn.id),
+            "type": txn.type.value,
+            "amount": float(txn.amount),
+            "customer_identifier": txn.customer_identifier,
+            "created_at": txn.created_at.isoformat()
+        }
+        for txn in recent_transactions
+    ]
+
+    # --- Top providers by transaction count ---
+    top_providers = db.query(
+        Transaction.provider_id,
+        Provider.name,
+        func.count(Transaction.id).label("transaction_count"),
+        func.coalesce(func.sum(Transaction.commission), 0).label("commission")
+    ).join(Provider, Transaction.provider_id == Provider.id
+    ).filter(Transaction.shop_id == shop_id
+    ).group_by(Transaction.provider_id, Provider.name
+    ).order_by(desc("transaction_count")).limit(5).all()
+
+    top_providers_list = [
+        {
+            "provider_id": str(tp.provider_id),
+            "provider_name": tp.name,
+            "transaction_count": tp.transaction_count,
+            "commission": float(tp.commission)
+        }
+        for tp in top_providers
+    ]
+
+    return success_response(
+        data={
+            "balances": {
+                "cash": cash_balance,
+                "mobile_float": mobile_float,
+                "bank_float": bank_float,
+                "total": total_balance
+            },
+            "today": {
+                "transactions": transactions_count,
+                "transaction_amount": float(transaction_amount),
+                "commissions": float(commissions),
+                "float_top_ups": float(float_top_ups),
+                "float_withdrawals": float(float_withdrawals)
+            },
+            "growth": {
+                "transactions": {
+                    "current": transactions_count,
+                    "previous": prev_count,
+                    "percentage": calc_percentage(transactions_count, prev_count)
+                },
+                "commissions": {
+                    "current": float(commissions),
+                    "previous": float(prev_commission),
+                    "percentage": calc_percentage(float(commissions), float(prev_commission))
+                }
+            },
+            "recent_transactions": recent_txns_list,
+            "top_providers": top_providers_list
+        }
     )
