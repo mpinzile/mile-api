@@ -1,3 +1,4 @@
+from http.client import HTTPException
 from fastapi import APIRouter, Request, Depends, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -8,8 +9,9 @@ from app.models.provider import Provider
 from app.models.enums import Category
 from app.utils.auth import get_current_user
 from app.models.user import User
-from app.utils.helpers import success_response, error_response
+from app.utils.helpers import success_response, error_response, verify_shop_access
 from app.utils.error_codes import ERROR_CODES
+from models.float import FloatBalance
 
 router = APIRouter()
 
@@ -64,3 +66,62 @@ async def delete_provider(
     db.delete(provider)
     db.commit()
     return success_response(message="Provider deleted successfully")
+
+
+@router.get("/{provider_id}/balance")
+def get_provider_balance(provider_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    provider = db.query(Provider).filter(Provider.id == provider_id).first()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    # Optional: verify current_user is owner or cashier of the provider's shop
+    shop = verify_shop_access(db, provider.shop_id, current_user)
+
+    # Get float balance
+    float_balance = db.query(FloatBalance).filter_by(
+        shop_id=provider.shop_id,
+        provider_id=provider.id,
+        category=provider.category
+    ).first()
+
+    balance = float(float_balance.balance) if float_balance else 0.0
+
+    return success_response(
+        data={
+            "provider_id": str(provider.id),
+            "provider_name": provider.name,
+            "category": provider.category.value,
+            "balance": balance,
+            "opening_balance": float(provider.opening_balance),
+            "last_updated": float_balance.last_updated.isoformat() if float_balance else None
+        }
+    )
+
+@router.put("/{provider_id}/balance")
+async def set_provider_opening_balance(provider_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    body = await request.json()
+    new_opening_balance = Decimal(body.get("opening_balance", 0))
+
+    provider = db.query(Provider).filter(Provider.id == provider_id).first()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    # Optional: verify current_user is owner or cashier
+    shop = verify_shop_access(db, provider.shop_id, current_user)
+
+    provider.opening_balance = new_opening_balance
+    provider.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(provider)
+
+    return success_response(
+        data={
+            "provider_id": str(provider.id),
+            "provider_name": provider.name,
+            "category": provider.category.value,
+            "opening_balance": float(provider.opening_balance),
+            "updated_at": provider.updated_at.isoformat()
+        },
+        message="Provider opening balance updated successfully"
+    )
