@@ -110,6 +110,7 @@ async def register(request: Request, response: Response, db: Session = Depends(g
                 "email": user.email,
                 "full_name": user.full_name,
                 "phone": user.phone,
+                "role": user.role.value,
                 "created_at": user.created_at.isoformat()
             },
             "access_token": access_token,
