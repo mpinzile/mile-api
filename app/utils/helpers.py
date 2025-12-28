@@ -181,10 +181,20 @@ def generate_reset_code(length: int = 6) -> str:
 def mask_email(email: str) -> str:
     try:
         local, domain = email.split("@")
+        # Mask local part
         if len(local) <= 2:
             local_masked = local[0] + "***"
         else:
             local_masked = local[0] + "***" + local[-1]
-        return f"{local_masked}@{domain}"
+        # Mask domain (keep first letter and TLD)
+        if "." in domain:
+            name, tld = domain.rsplit(".", 1)
+            if len(name) <= 2:
+                domain_masked = name[0] + "***" + "." + tld
+            else:
+                domain_masked = name[0] + "***" + name[-1] + "." + tld
+        else:
+            domain_masked = domain[0] + "***"
+        return f"{local_masked}@{domain_masked}"
     except Exception:
         return "***"
