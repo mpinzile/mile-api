@@ -1,9 +1,9 @@
 # app/api/routes/shops.py
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from fastapi import APIRouter, Query, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import asc, desc, func, or_, select
+from sqlalchemy import asc, desc, func, or_, select, case
 from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
 from app.db.get_db import get_db
@@ -1722,7 +1722,7 @@ def get_commission_report(
 
         breakdown = [
             {
-                "date": row.period.date().isoformat(),
+                "date": row.period.isoformat(),
                 "commission": float(row.commission),
                 "transaction_count": row.count
             }
@@ -1746,13 +1746,11 @@ def get_commission_report(
         {
             "provider_id": str(p.id),
             "provider_name": p.name,
-            "commission": float(p.commission),
-            "percentage": round((float(p.commission) / total_commission) * 100, 2)
-            if total_commission > 0 else 0.0
+            "commission": p.commission, 
+            "percentage": (p.commission / total_commission * Decimal(100)).quantize(Decimal('0.01'))
         }
         for p in provider_rows
     ]
-
 
     # BY TRANSACTION TYPE
     type_rows = db.query(
@@ -1767,9 +1765,9 @@ def get_commission_report(
     by_type = [
         {
             "type": t.type.value,
-            "commission": float(t.commission),
-            "percentage": round((float(t.commission) / total_commission) * 100, 2)
-            if total_commission > 0 else 0.0
+            "commission": float(t.commission.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+            "percentage": float((t.commission / total_commission * Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                        if total_commission > 0 else 0.0
         }
         for t in type_rows
     ]
@@ -1840,7 +1838,7 @@ def get_transaction_report(
 
     data = [
         {
-            "date": r[0].date().isoformat(),
+            "date": r[0].isoformat(),
             "transaction_count": r[1],
             "total_amount": float(r[2]),
             "total_commission": float(r[3])
@@ -1892,20 +1890,29 @@ def get_float_report(
         FloatMovement.id.in_(query.with_entities(FloatMovement.id))
     ).scalar()
 
+    # --- Provider summary ---
     provider_rows = db.query(
         Provider.id,
         Provider.name,
-        func.sum(func.case(
-            [(FloatMovement.type == FloatOperationType.top_up, FloatMovement.amount)],
-            else_=0
-        )),
-        func.sum(func.case(
-            [(FloatMovement.type == FloatOperationType.withdraw, FloatMovement.amount)],
-            else_=0
-        ))
-    ).join(Provider, Provider.id == FloatMovement.provider_id
-    ).filter(FloatMovement.id.in_(query.with_entities(FloatMovement.id))
-    ).group_by(Provider.id, Provider.name).all()
+        func.sum(
+            case(
+                (FloatMovement.type == FloatOperationType.top_up, FloatMovement.amount),
+                else_=0
+            )
+        ).label("top_ups"),
+        func.sum(
+            case(
+                (FloatMovement.type == FloatOperationType.withdraw, FloatMovement.amount),
+                else_=0
+            )
+        ).label("withdrawals")
+    ).join(
+        FloatMovement, FloatMovement.provider_id == Provider.id
+    ).filter(
+        FloatMovement.id.in_(query.with_entities(FloatMovement.id))
+    ).group_by(
+        Provider.id, Provider.name
+    ).all()
 
     by_provider = []
     for p in provider_rows:
@@ -1917,10 +1924,10 @@ def get_float_report(
         by_provider.append({
             "provider_id": str(p.id),
             "provider_name": p.name,
-            "top_ups": float(p[2]),
-            "withdrawals": float(p[3]),
-            "net_change": float(p[2] - p[3]),
-            "current_balance": float(balance)
+            "top_ups": round(float(p.top_ups), 2),
+            "withdrawals": round(float(p.withdrawals), 2),
+            "net_change": round(float(p.top_ups - p.withdrawals), 2),
+            "current_balance": round(float(balance), 2)
         })
 
     return {
@@ -1928,15 +1935,14 @@ def get_float_report(
         "data": {
             "period": {"start_date": start_date, "end_date": end_date},
             "summary": {
-                "total_top_ups": float(total_top_ups),
-                "total_withdrawals": float(total_withdrawals),
-                "net_float_change": float(total_top_ups - total_withdrawals),
-                "new_capital_injected": float(new_capital)
+                "total_top_ups": round(float(total_top_ups), 2),
+                "total_withdrawals": round(float(total_withdrawals), 2),
+                "net_float_change": round(float(total_top_ups - total_withdrawals), 2),
+                "new_capital_injected": round(float(new_capital), 2)
             },
             "by_provider": by_provider
         }
     }
-
 
 @router.get("/{shop_id}/reports/profit-loss")
 def get_profit_loss_report(
