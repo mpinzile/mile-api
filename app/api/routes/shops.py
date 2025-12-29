@@ -1929,8 +1929,18 @@ def get_float_report(
     provider_rows = db.query(
         Provider.id,
         Provider.name,
-        func.sum(case([(FloatMovement.type == FloatOperationType.top_up, FloatMovement.amount)], else_=0)).label("top_ups"),
-        func.sum(case([(FloatMovement.type == FloatOperationType.withdraw, FloatMovement.amount)], else_=0)).label("withdrawals")
+        func.sum(
+            case(
+                (FloatMovement.type == FloatOperationType.top_up, FloatMovement.amount),
+                else_=0
+            )
+        ).label("top_ups"),
+        func.sum(
+            case(
+                (FloatMovement.type == FloatOperationType.withdraw, FloatMovement.amount),
+                else_=0
+            )
+        ).label("withdrawals")
     ).join(FloatMovement, FloatMovement.provider_id == Provider.id)\
      .filter(*filters)\
      .group_by(Provider.id, Provider.name).all()
@@ -1952,8 +1962,18 @@ def get_float_report(
 
     movement_rows = db.query(
         func.date(FloatMovement.transaction_date).label("date"),
-        func.sum(case([(FloatMovement.type == FloatOperationType.top_up, FloatMovement.amount)], else_=0)).label("top_ups"),
-        func.sum(case([(FloatMovement.type == FloatOperationType.withdraw, FloatMovement.amount)], else_=0)).label("withdrawals")
+        func.sum(
+            case(
+                (FloatMovement.type == FloatOperationType.top_up, FloatMovement.amount),
+                else_=0
+            )
+        ).label("top_ups"),
+        func.sum(
+            case(
+                (FloatMovement.type == FloatOperationType.withdraw, FloatMovement.amount),
+                else_=0
+            )
+        ).label("withdrawals")
     ).filter(*filters)\
      .group_by(func.date(FloatMovement.transaction_date))\
      .order_by(func.date(FloatMovement.transaction_date).desc())\
@@ -1982,6 +2002,7 @@ def get_float_report(
             "movements": movements
         }
     }
+
 
 @router.get("/{shop_id}/reports/profit-loss")
 def get_profit_loss_report(
