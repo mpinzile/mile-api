@@ -791,6 +791,18 @@ async def create_transaction(
     amount = Decimal(body["amount"])
     commission = Decimal(body.get("commission", 0))
 
+    # Check for duplicate reference
+    existing_txn = db.query(Transaction).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.reference == body["reference"]
+    ).first()
+
+    if existing_txn:
+        return error_response(
+            ERROR_CODES["DUPLICATE_TRANSACTION"],
+            f"A transaction with reference '{body['reference']}' already exists"
+        )
+
     # Fetch or create FloatBalance for this provider and category
     float_balance_obj = db.query(FloatBalance).filter(
         FloatBalance.shop_id == shop_id,
