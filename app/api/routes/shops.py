@@ -1522,3 +1522,490 @@ def list_float_movements(
             "net_movement": float(net_movement)
         }
     )
+
+@router.get("/{shop_id}/reports/daily-summary")
+def get_daily_summary_report(
+    shop_id: str,
+    date: str = Query(default=None, description="YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Validate shop
+    shop = db.query(Shop).filter(Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Date range
+    if date:
+        report_date = datetime.strptime(date, "%Y-%m-%d").date()
+    else:
+        report_date = datetime.utcnow().date()
+
+    start = datetime.combine(report_date, datetime.min.time())
+    end = start + timedelta(days=1)
+
+    # TRANSACTIONS SUMMARY
+    txns = db.query(
+        func.count(Transaction.id).label("count"),
+        func.coalesce(func.sum(Transaction.amount), 0).label("amount"),
+        func.coalesce(func.sum(Transaction.commission), 0).label("commission")
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).one()
+
+    # By category
+    txn_by_category = db.query(
+        Transaction.category,
+        func.count(Transaction.id),
+        func.coalesce(func.sum(Transaction.amount), 0),
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).group_by(Transaction.category).all()
+
+    by_category = {
+        row.category.value: {
+            "count": row[1],
+            "amount": float(row[2]),
+            "commission": float(row[3])
+        }
+        for row in txn_by_category
+    }
+
+    # By type
+    txn_by_type = db.query(
+        Transaction.type,
+        func.count(Transaction.id),
+        func.coalesce(func.sum(Transaction.amount), 0),
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).group_by(Transaction.type).all()
+
+    by_type = {
+        row.type.value: {
+            "count": row[1],
+            "amount": float(row[2]),
+            "commission": float(row[3])
+        }
+        for row in txn_by_type
+    }
+
+    # FLOAT MOVEMENTS
+    total_top_ups = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
+        FloatMovement.shop_id == shop_id,
+        FloatMovement.type == FloatOperationType.top_up,
+        FloatMovement.transaction_date >= start,
+        FloatMovement.transaction_date < end
+    ).scalar()
+
+    total_withdrawals = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
+        FloatMovement.shop_id == shop_id,
+        FloatMovement.type == FloatOperationType.withdraw,
+        FloatMovement.transaction_date >= start,
+        FloatMovement.transaction_date < end
+    ).scalar()
+
+    # BALANCES
+    cash_balance = db.query(CashBalance).filter(
+        CashBalance.shop_id == shop_id
+    ).first()
+
+    opening_cash = float(cash_balance.opening_balance) if cash_balance else 0.0
+    closing_cash = float(cash_balance.balance) if cash_balance else 0.0
+
+    float_balances = db.query(FloatBalance).filter(
+        FloatBalance.shop_id == shop_id
+    ).all()
+
+    opening_float = 0.0
+    closing_float = sum(float(f.balance) for f in float_balances)
+
+    return {
+        "success": True,
+        "data": {
+            "date": report_date.isoformat(),
+            "transactions": {
+                "total_count": txns.count,
+                "total_amount": float(txns.amount),
+                "total_commission": float(txns.commission),
+                "by_category": by_category,
+                "by_type": by_type
+            },
+            "float_movements": {
+                "total_top_ups": float(total_top_ups),
+                "total_withdrawals": float(total_withdrawals),
+                "net_movement": float(total_top_ups - total_withdrawals)
+            },
+            "balances": {
+                "opening_cash": opening_cash,
+                "closing_cash": closing_cash,
+                "opening_float": opening_float,
+                "closing_float": closing_float
+            }
+        }
+    }
+
+
+@router.get("/{shop_id}/reports/commissions")
+def get_commission_report(
+    shop_id: str,
+    start_date: str = Query(..., description="YYYY-MM-DD"),
+    end_date: str = Query(..., description="YYYY-MM-DD"),
+    group_by: str = Query("day", regex="^(day|week|month|provider|type)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Validate shop
+    shop = db.query(Shop).filter(Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Date range
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+
+    period_length = end - start
+    prev_start = start - period_length
+    prev_end = start
+
+    # TOTAL COMMISSION (CURRENT)
+    total_commission = db.query(
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).scalar()
+
+
+    # PREVIOUS PERIOD COMMISSION
+    prev_commission = db.query(
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= prev_start,
+        Transaction.transaction_date < prev_end
+    ).scalar()
+
+    percentage_change = (
+        round(((total_commission - prev_commission) / prev_commission) * 100, 2)
+        if prev_commission > 0 else (100.0 if total_commission > 0 else 0.0)
+    )
+
+    # BREAKDOWN (time-based)
+    breakdown = []
+
+    if group_by in ["day", "week", "month"]:
+        if group_by == "day":
+            group_expr = func.date(Transaction.transaction_date)
+        elif group_by == "week":
+            group_expr = func.date_trunc("week", Transaction.transaction_date)
+        else:
+            group_expr = func.date_trunc("month", Transaction.transaction_date)
+
+        rows = db.query(
+            group_expr.label("period"),
+            func.coalesce(func.sum(Transaction.commission), 0).label("commission"),
+            func.count(Transaction.id).label("count")
+        ).filter(
+            Transaction.shop_id == shop_id,
+            Transaction.transaction_date >= start,
+            Transaction.transaction_date < end
+        ).group_by(group_expr).order_by(desc("period")).all()
+
+        breakdown = [
+            {
+                "date": row.period.date().isoformat(),
+                "commission": float(row.commission),
+                "transaction_count": row.count
+            }
+            for row in rows
+        ]
+
+    # BY PROVIDER
+    provider_rows = db.query(
+        Provider.id,
+        Provider.name,
+        func.coalesce(func.sum(Transaction.commission), 0).label("commission")
+    ).join(
+        Provider, Transaction.provider_id == Provider.id
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).group_by(Provider.id, Provider.name).all()
+
+    by_provider = [
+        {
+            "provider_id": str(p.id),
+            "provider_name": p.name,
+            "commission": float(p.commission),
+            "percentage": round((float(p.commission) / total_commission) * 100, 2)
+            if total_commission > 0 else 0.0
+        }
+        for p in provider_rows
+    ]
+
+
+    # BY TRANSACTION TYPE
+    type_rows = db.query(
+        Transaction.type,
+        func.coalesce(func.sum(Transaction.commission), 0).label("commission")
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).group_by(Transaction.type).all()
+
+    by_type = [
+        {
+            "type": t.type.value,
+            "commission": float(t.commission),
+            "percentage": round((float(t.commission) / total_commission) * 100, 2)
+            if total_commission > 0 else 0.0
+        }
+        for t in type_rows
+    ]
+
+    # RESPONSE
+    return {
+        "success": True,
+        "data": {
+            "period": {
+                "start_date": start_date,
+                "end_date": end_date
+            },
+            "total_commission": float(total_commission),
+            "commission_growth": {
+                "current_period": float(total_commission),
+                "previous_period": float(prev_commission),
+                "percentage_change": percentage_change
+            },
+            "breakdown": breakdown,
+            "by_provider": by_provider,
+            "by_type": by_type
+        }
+    }
+
+@router.get("/{shop_id}/reports/transactions")
+def get_transaction_report(
+    shop_id: str,
+    start_date: str = Query(..., description="YYYY-MM-DD"),
+    end_date: str = Query(..., description="YYYY-MM-DD"),
+    category: str = Query(None),
+    type: str = Query(None),
+    provider_id: str = Query(None),
+    group_by: str = Query("day", regex="^(day|week|month)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+
+    base_query = db.query(Transaction).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    )
+
+    if category:
+        base_query = base_query.filter(Transaction.category == category)
+    if type:
+        base_query = base_query.filter(Transaction.type == type)
+    if provider_id:
+        base_query = base_query.filter(Transaction.provider_id == provider_id)
+
+    if group_by == "day":
+        group_expr = func.date(Transaction.transaction_date)
+    elif group_by == "week":
+        group_expr = func.date_trunc("week", Transaction.transaction_date)
+    else:
+        group_expr = func.date_trunc("month", Transaction.transaction_date)
+
+    rows = db.query(
+        group_expr.label("period"),
+        func.count(Transaction.id),
+        func.coalesce(func.sum(Transaction.amount), 0),
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.id.in_(base_query.with_entities(Transaction.id))
+    ).group_by(group_expr).order_by(group_expr).all()
+
+    data = [
+        {
+            "date": r[0].date().isoformat(),
+            "transaction_count": r[1],
+            "total_amount": float(r[2]),
+            "total_commission": float(r[3])
+        }
+        for r in rows
+    ]
+
+    return {
+        "success": True,
+        "data": {
+            "period": {"start_date": start_date, "end_date": end_date},
+            "results": data
+        }
+    }
+
+@router.get("/{shop_id}/reports/float")
+def get_float_report(
+    shop_id: str,
+    start_date: str = Query(..., description="YYYY-MM-DD"),
+    end_date: str = Query(..., description="YYYY-MM-DD"),
+    provider_id: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+
+    query = db.query(FloatMovement).filter(
+        FloatMovement.shop_id == shop_id,
+        FloatMovement.transaction_date >= start,
+        FloatMovement.transaction_date < end
+    )
+
+    if provider_id:
+        query = query.filter(FloatMovement.provider_id == provider_id)
+
+    total_top_ups = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
+        FloatMovement.type == FloatOperationType.top_up,
+        FloatMovement.id.in_(query.with_entities(FloatMovement.id))
+    ).scalar()
+
+    total_withdrawals = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
+        FloatMovement.type == FloatOperationType.withdraw,
+        FloatMovement.id.in_(query.with_entities(FloatMovement.id))
+    ).scalar()
+
+    new_capital = db.query(func.coalesce(func.sum(FloatMovement.amount), 0)).filter(
+        FloatMovement.is_new_capital == True,
+        FloatMovement.id.in_(query.with_entities(FloatMovement.id))
+    ).scalar()
+
+    provider_rows = db.query(
+        Provider.id,
+        Provider.name,
+        func.sum(func.case(
+            [(FloatMovement.type == FloatOperationType.top_up, FloatMovement.amount)],
+            else_=0
+        )),
+        func.sum(func.case(
+            [(FloatMovement.type == FloatOperationType.withdraw, FloatMovement.amount)],
+            else_=0
+        ))
+    ).join(Provider, Provider.id == FloatMovement.provider_id
+    ).filter(FloatMovement.id.in_(query.with_entities(FloatMovement.id))
+    ).group_by(Provider.id, Provider.name).all()
+
+    by_provider = []
+    for p in provider_rows:
+        balance = db.query(func.coalesce(func.sum(FloatBalance.balance), 0)).filter(
+            FloatBalance.shop_id == shop_id,
+            FloatBalance.provider_id == p.id
+        ).scalar()
+
+        by_provider.append({
+            "provider_id": str(p.id),
+            "provider_name": p.name,
+            "top_ups": float(p[2]),
+            "withdrawals": float(p[3]),
+            "net_change": float(p[2] - p[3]),
+            "current_balance": float(balance)
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "period": {"start_date": start_date, "end_date": end_date},
+            "summary": {
+                "total_top_ups": float(total_top_ups),
+                "total_withdrawals": float(total_withdrawals),
+                "net_float_change": float(total_top_ups - total_withdrawals),
+                "new_capital_injected": float(new_capital)
+            },
+            "by_provider": by_provider
+        }
+    }
+
+
+@router.get("/{shop_id}/reports/profit-loss")
+def get_profit_loss_report(
+    shop_id: str,
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+
+    period_len = end - start
+    prev_start = start - period_len
+    prev_end = start
+
+    current = db.query(
+        func.coalesce(func.sum(Transaction.commission), 0),
+        func.coalesce(func.sum(Transaction.amount), 0),
+        func.count(Transaction.id)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).one()
+
+    previous = db.query(
+        func.coalesce(func.sum(Transaction.commission), 0),
+        func.coalesce(func.sum(Transaction.amount), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= prev_start,
+        Transaction.transaction_date < prev_end
+    ).one()
+
+    commission_growth = (
+        ((current[0] - previous[0]) / previous[0]) * 100
+        if previous[0] > 0 else 0
+    )
+
+    volume_growth = (
+        ((current[1] - previous[1]) / previous[1]) * 100
+        if previous[1] > 0 else 0
+    )
+
+    by_category = db.query(
+        Transaction.category,
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ).group_by(Transaction.category).all()
+
+    return {
+        "success": True,
+        "data": {
+            "period": {"start_date": start_date, "end_date": end_date},
+            "revenue": {
+                "total_commissions": float(current[0]),
+                "by_category": {c.category.value: float(c[1]) for c in by_category}
+            },
+            "transaction_volume": {
+                "total_amount": float(current[1]),
+                "total_count": current[2]
+            },
+            "growth": {
+                "commission_growth_percentage": round(commission_growth, 2),
+                "volume_growth_percentage": round(volume_growth, 2)
+            }
+        }
+    }
