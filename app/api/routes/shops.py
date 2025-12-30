@@ -1793,6 +1793,7 @@ def get_commission_report(
         }
     }
 
+
 @router.get("/{shop_id}/reports/transactions")
 def get_transaction_report(
     shop_id: str,
@@ -1812,9 +1813,11 @@ def get_transaction_report(
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
 
-    filters = [Transaction.shop_id == shop_id,
-               Transaction.transaction_date >= start,
-               Transaction.transaction_date < end]
+    filters = [
+        Transaction.shop_id == shop_id,
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end
+    ]
     if category:
         filters.append(Transaction.category == Category(category))
     if type:
@@ -1856,11 +1859,12 @@ def get_transaction_report(
             func.coalesce(func.sum(Transaction.amount), 0),
             func.coalesce(func.sum(Transaction.commission), 0)
         ).filter(*filters, Transaction.category == Category(cat)).one()
-        by_category[cat] = {
-            "count": cat_total[0],
-            "amount": float(cat_total[1]),
-            "commission": float(cat_total[2])
-        }
+        if cat_total[0] > 0:  # include only if there are transactions
+            by_category[cat] = {
+                "transaction_count": cat_total[0],
+                "total_amount": float(cat_total[1]),
+                "total_commission": float(cat_total[2])
+            }
 
     # BY TYPE
     type_rows = db.query(
@@ -1870,7 +1874,13 @@ def get_transaction_report(
         func.coalesce(func.sum(Transaction.commission), 0)
     ).filter(*filters).group_by(Transaction.type).all()
 
-    by_type = {r.type.value: {"count": r[1], "amount": float(r[2]), "commission": float(r[3])} for r in type_rows}
+    by_type = {
+        r.type.value: {
+            "transaction_count": r[1],
+            "total_amount": float(r[2]),
+            "total_commission": float(r[3])
+        } for r in type_rows
+    }
 
     # BY PROVIDER
     provider_rows = db.query(
