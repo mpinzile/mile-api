@@ -161,6 +161,15 @@ async def login(request: Request, response: Response, db: Session = Depends(get_
     if user.role == AppRole.cashier:
         cashier = db.query(Cashier).filter(Cashier.user_id == user.id).first()
         if cashier:
+            # Check if cashier is disabled
+            if not cashier.is_active:
+                return JSONResponse(
+                    status_code=403,
+                    content=error_response(
+                        ERROR_CODES["FORBIDDEN"],
+                        "Your account is disabled. Please contact your shop administrator."
+                    )
+                )
             shop_id = str(cashier.shop_id)
 
     # Create tokens
