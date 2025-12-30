@@ -1812,11 +1812,9 @@ def get_transaction_report(
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
 
-    filters = [
-        Transaction.shop_id == shop_id,
-        Transaction.transaction_date >= start,
-        Transaction.transaction_date < end
-    ]
+    filters = [Transaction.shop_id == shop_id,
+               Transaction.transaction_date >= start,
+               Transaction.transaction_date < end]
     if category:
         filters.append(Transaction.category == Category(category))
     if type:
@@ -1824,15 +1822,47 @@ def get_transaction_report(
     if provider_id:
         filters.append(Transaction.provider_id == provider_id)
 
-    total = db.query(
+    # SUMMARY
+    total_count, total_amount, total_commission = db.query(
         func.count(Transaction.id),
         func.coalesce(func.sum(Transaction.amount), 0),
         func.coalesce(func.sum(Transaction.commission), 0)
     ).filter(*filters).one()
+    average_transaction = float(total_amount) / total_count if total_count else 0.0
 
-    total_count, total_amount, total_commission = total
-    average_amount = float(total_amount) / total_count if total_count else 0.0
+    # DAILY BREAKDOWN
+    daily_rows = db.query(
+        func.date(Transaction.transaction_date).label("date"),
+        func.count(Transaction.id),
+        func.coalesce(func.sum(Transaction.amount), 0),
+        func.coalesce(func.sum(Transaction.commission), 0)
+    ).filter(*filters).group_by(func.date(Transaction.transaction_date)).order_by(func.date(Transaction.transaction_date)).all()
 
+    daily_breakdown = [
+        {
+            "date": r.date.isoformat(),
+            "transaction_count": r[1],
+            "total_amount": float(r[2]),
+            "total_commission": float(r[3])
+        } for r in daily_rows
+    ]
+
+    # BY CATEGORY
+    categories = ["mobile", "bank"]
+    by_category = {}
+    for cat in categories:
+        cat_total = db.query(
+            func.count(Transaction.id),
+            func.coalesce(func.sum(Transaction.amount), 0),
+            func.coalesce(func.sum(Transaction.commission), 0)
+        ).filter(*filters, Transaction.category == Category(cat)).one()
+        by_category[cat] = {
+            "count": cat_total[0],
+            "amount": float(cat_total[1]),
+            "commission": float(cat_total[2])
+        }
+
+    # BY TYPE
     type_rows = db.query(
         Transaction.type,
         func.count(Transaction.id),
@@ -1840,16 +1870,9 @@ def get_transaction_report(
         func.coalesce(func.sum(Transaction.commission), 0)
     ).filter(*filters).group_by(Transaction.type).all()
 
-    by_type = [
-        {
-            "type": r.type.value,
-            "count": r[1],
-            "amount": float(r[2]),
-            "commission": float(r[3])
-        }
-        for r in type_rows
-    ]
+    by_type = {r.type.value: {"count": r[1], "amount": float(r[2]), "commission": float(r[3])} for r in type_rows}
 
+    # BY PROVIDER
     provider_rows = db.query(
         Provider.id,
         Provider.name,
@@ -1863,46 +1886,27 @@ def get_transaction_report(
         {
             "provider_id": str(r.id),
             "provider_name": r.name,
-            "count": r[2],
-            "amount": float(r[3]),
-            "commission": float(r[4])
+            "transaction_count": r[2],
+            "total_amount": float(r[3]),
+            "total_commission": float(r[4])
         } for r in provider_rows
-    ]
-
-    if group_by == "day":
-        group_expr = func.date(Transaction.transaction_date)
-    else:
-        group_expr = func.date_trunc(group_by, Transaction.transaction_date)
-
-    period_rows = db.query(
-        group_expr.label("period"),
-        func.count(Transaction.id),
-        func.coalesce(func.sum(Transaction.amount), 0),
-        func.coalesce(func.sum(Transaction.commission), 0)
-    ).filter(*filters).group_by(group_expr).order_by(desc(group_expr)).all()
-
-    by_period = [
-        {
-            "period": r.period.isoformat() if hasattr(r.period, "isoformat") else str(r.period),
-            "count": r[1],
-            "amount": float(r[2]),
-            "commission": float(r[3])
-        } for r in period_rows
     ]
 
     return {
         "success": True,
+        "message": "Transaction report generated successfully",
         "data": {
             "period": {"start_date": start_date, "end_date": end_date},
             "summary": {
-                "total_count": total_count,
+                "total_transactions": total_count,
                 "total_amount": float(total_amount),
                 "total_commission": float(total_commission),
-                "average_amount": average_amount
+                "average_transaction": average_transaction
             },
+            "daily_breakdown": daily_breakdown,
+            "by_category": by_category,
             "by_type": by_type,
-            "by_provider": by_provider,
-            "by_period": by_period
+            "by_provider": by_provider
         }
     }
 
