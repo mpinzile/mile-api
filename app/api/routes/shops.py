@@ -1348,8 +1348,9 @@ def get_dashboard(
     prev_start = start - period_length
     prev_end = start
 
+    # Get previous period data: count and sum of amounts & commissions
     prev_summary = db.query(
-        func.count(Transaction.id),
+        func.count(Transaction.id),                 
         func.coalesce(func.sum(Transaction.amount), 0),
         func.coalesce(func.sum(Transaction.commission), 0)
     ).filter(
@@ -1357,7 +1358,8 @@ def get_dashboard(
         Transaction.transaction_date >= prev_start,
         Transaction.transaction_date <= prev_end
     ).first()
-    prev_count, _, prev_commission = prev_summary
+
+    prev_count, prev_amount, prev_commission = prev_summary
 
     def calc_percentage(current, previous):
         if previous == 0:
@@ -1420,7 +1422,7 @@ def get_dashboard(
                 "transactions": {
                     "current": transactions_count,
                     "previous": prev_count,
-                    "percentage": calc_percentage(transactions_count, prev_count)
+                    "percentage": calc_percentage(transaction_amount, prev_amount)
                 },
                 "commissions": {
                     "current": float(commissions),
